@@ -140,6 +140,10 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
      para condomínios com certificado próprio, não para procuração. O DF compartilha as
      notas do ISSNet com o ADN. `condosys adn-test` faz uma consulta e salva a resposta
      bruta para confirmar o layout (Fase 3).
+     **Confirmado em 23/10/2026** (`adn-test --cert sema.pfx`): HTTP 200, lote de 50 NFS-e
+     do DF (município 5300108) em que a Sema é tomadora, com retenções federais, ISSQN e
+     valor líquido no XML nacional — detalhes e mapeamento de campos em
+     [adn.md](adn.md).
   3. O modo automático (`client_certificates`) continua no código e nos testes, para o caso
      de a proteção mudar.
 - **Certificados no navegador:** `condosys cert install <nome>` instala no cofre usado pelo

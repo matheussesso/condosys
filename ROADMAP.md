@@ -43,7 +43,7 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [ ] Abrir cada nota ("Visualizar") e extrair `InvoiceDetail`
 - [ ] Verificar se o ícone ao lado de "Visualizar" baixa o **XML** — se sim, preferir XML a HTML
 - [ ] **ADN para acesso DIRETO**: paginação por NSU, parsing do XML nacional, filtro por competência
-      (a consulta e o download já existem em `adn.py`; procuração não é aceita pelo ADN)
+      (consulta confirmada em produção em 23/10/2026 — ver `docs/adn.md`; procuração não é aceita pelo ADN)
 
 ## Fase 4 — Exportação Excel
 
