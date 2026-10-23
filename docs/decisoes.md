@@ -118,6 +118,38 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
 - **Pendente (teste manual com certificado real):** confirmar o handshake com um A1 real,
   a URL após o login e o seletor de contribuinte (procuração).
 
+## ADR-009 — Login assistido (procuração) e ADN (acesso direto)
+
+- **Contexto (23/10/2026, testes reais com o certificado da Sema):**
+  - com a origem certa, o `client_certificates` entrega o certificado ao iHub, mas o popup
+    mostra o Cloudflare Turnstile e a verificação **falha mesmo quando uma pessoa marca a
+    caixa** ("A verificação de segurança falhou") — o Cloudflare rejeita o navegador
+    controlado por automação;
+  - o mesmo login feito à mão no Firefox comum, com o certificado instalado no navegador,
+    funciona e cai em `online/default/empresas.aspx` (seleção da empresa na procuração).
+- **Decisão:** não contornar a proteção (sem "stealth", sem esconder automação).
+  1. **Procuração → login assistido** (`CONDOSYS_LOGIN_MODE=assisted`, padrão): o
+     condosys abre o Chrome/Edge instalado como um processo comum (perfil próprio em
+     `browser-profile/`, porta DevTools local), a pessoa faz o login como hoje (escolhe o
+     certificado instalado no sistema, marca a caixa se aparecer) e o condosys **só se
+     conecta depois** que uma aba está dentro do portal (sondagem de `/json/list`, que não
+     se anexa às páginas). A partir daí ele conduz o portal (seleção da empresa, consulta,
+     recon). Um login por certificado.
+  2. **Direto → API oficial do ADN** (`GET /contribuintes/DFe/{NSU}?lote=true`, mTLS).
+     O manual exige certificado com a **mesma raiz de CNPJ** do consultado, então serve
+     para condomínios com certificado próprio, não para procuração. O DF compartilha as
+     notas do ISSNet com o ADN. `condosys adn-test` faz uma consulta e salva a resposta
+     bruta para confirmar o layout (Fase 3).
+  3. O modo automático (`client_certificates`) continua no código e nos testes, para o caso
+     de a proteção mudar.
+- **Certificados no navegador:** `condosys cert install <nome>` instala no cofre usado pelo
+  Chrome/Edge (Windows: Usuário Atual → Pessoal via `Import-PfxCertificate`; Linux: NSS
+  `~/.pki/nssdb` via `pk12util`), com o `.pfx` recodificado e senha descartável — a senha
+  real não aparece em linha de comando. O Firefox usa outro cofre e não serve para o modo
+  assistido (o Playwright só se conecta a Chrome/Edge).
+- **Consequência:** a coleta não roda sem uma pessoa para o login de cada certificado; a
+  Fase 4 deve agrupar condomínios por certificado.
+
 ## ADR-008 — Gravação do recon
 
 - **Decisão:** `PageRecorder` salva HTML (página + frames) e screenshot a cada evento

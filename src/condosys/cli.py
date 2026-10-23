@@ -16,8 +16,16 @@ from rich.console import Console
 from rich.table import Table
 
 from condosys import __version__
+from condosys.adn import AdnError, decode_documents, fetch_dfe, same_cnpj_root
+from condosys.assisted_browser import AssistedLoginError
 from condosys.browser import BrowserSetupError
-from condosys.certificates import CertificateError, list_certificate_files, read_certificate_info
+from condosys.cert_store import CertStoreError, install_certificate
+from condosys.certificates import (
+    CertificateError,
+    list_certificate_files,
+    load_pfx,
+    read_certificate_info,
+)
 from condosys.config_loader import (
     CondominiumNotFoundError,
     ConfigError,
@@ -238,6 +246,31 @@ def cert_list() -> None:
     console.print(table)
 
 
+@cert_app.command("install")
+def cert_install(
+    name: Annotated[str, typer.Argument(help="Nome do arquivo em certs/ (ex.: sema.pfx).")],
+) -> None:
+    """Instala o certificado no Chrome/Edge deste usuário (para o login assistido)."""
+    settings = get_settings()
+    path = settings.certs_dir / name
+    if not path.is_file():
+        raise _fail(f"{path} não existe. Cadastre antes com: condosys cert add <arquivo>")
+    try:
+        password = get_password(name)
+    except CredentialStoreError as exc:
+        raise _fail(str(exc)) from exc
+    if password is None:
+        raise _fail(f"senha de {name} não cadastrada. Rode: condosys cert add certs/{name}")
+    try:
+        info = read_certificate_info(path, password)
+        where = install_certificate(path, password)
+    except (CertificateError, CertStoreError) as exc:
+        raise _fail(str(exc)) from exc
+    console.print(f"[green]Certificado instalado:[/] {info.holder_name}")
+    console.print(f"Local: {where}")
+    console.print("Feche e abra o navegador para ele aparecer na lista de certificados.")
+
+
 @cert_app.command("remove")
 def cert_remove(
     name: Annotated[str, typer.Argument(help="Nome do arquivo em certs/ (ex.: the-sun.pfx).")],
@@ -345,10 +378,28 @@ def _file_slug(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "-", plain).strip("-").lower()[:40] or "condominio"
 
 
-def _describe(condominium: Condominium) -> None:
+def _describe(settings: Settings, condominium: Condominium) -> None:
     console.print(
         f"Condomínio: [bold]{condominium.name}[/] ({condominium.cnpj_formatted}) — "
         f"acesso {condominium.access_mode.value} com certs/{condominium.certificate}"
+    )
+    if settings.login_mode != "assisted":
+        return
+    holder = condominium.certificate
+    try:
+        password = get_password(condominium.certificate)
+        if password is not None:
+            info = read_certificate_info(settings.certs_dir / condominium.certificate, password)
+            holder = f"{info.holder_name} ({format_cnpj(info.cnpj) if info.cnpj else '-'})"
+    except (CredentialStoreError, CertificateError):
+        pass
+    console.print(
+        "\n[bold]Login assistido[/] — na janela do navegador que vai abrir:\n"
+        "  1. clique em [bold]Logar com certificado digital[/];\n"
+        f"  2. escolha o certificado [bold]{holder}[/];\n"
+        "  3. se aparecer [bold]Confirme que é humano[/], marque a caixa.\n"
+        "Quando o portal abrir, o condosys assume sozinho. "
+        f"(Aguardando até {settings.assisted_login_timeout_ms // 1000} s.)\n"
     )
 
 
@@ -377,7 +428,7 @@ def login_test(
     """Faz login no ISSNet com o certificado do condomínio e confere o ambiente."""
     settings = get_settings()
     condominium = resolve_condominium(settings, condominio)
-    _describe(condominium)
+    _describe(settings, condominium)
     stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
     base_name = f"login-test_{_file_slug(condominium.name)}_{stamp}"
 
@@ -394,7 +445,7 @@ def login_test(
             shot = session.screenshot(settings.debug_dir / f"{base_name}.png")
             title = session.page.title()
             url = session.page.url
-    except (BrowserSetupError, LoginError, CredentialStoreError) as exc:
+    except (BrowserSetupError, AssistedLoginError, LoginError, CredentialStoreError) as exc:
         raise _fail(str(exc)) from exc
     except PlaywrightError as exc:
         raise _fail(f"erro no navegador: {exc}") from exc
@@ -443,7 +494,7 @@ def recon(
     """Faz login e abre o Playwright Inspector, salvando HTML + screenshot de cada tela."""
     settings = get_settings()
     condominium = resolve_condominium(settings, condominio)
-    _describe(condominium)
+    _describe(settings, condominium)
     out_dir = new_recon_dir(settings.debug_dir)
     recorder = PageRecorder(out_dir)
     contexts: list[BrowserContext] = []
@@ -465,6 +516,9 @@ def recon(
                 login_failed = True
                 console.print(f"[bold red]Login falhou:[/] {exc}")
                 console.print("O Inspector vai abrir mesmo assim para investigar a tela.")
+            if session.assisted:
+                # The pages before the takeover were not recorded; save the current one.
+                recorder.capture(session.page, "inicial")
             if not login_failed and needs_taxpayer_selection(condominium):
                 console.print(
                     f"[bold yellow]Procuração:[/] selecione {condominium.name} "
@@ -493,7 +547,7 @@ def recon(
                     )
                 except PlaywrightError as exc:
                     console.print(f"[yellow]Não foi possível salvar o trace:[/] {exc}")
-    except (BrowserSetupError, CredentialStoreError) as exc:
+    except (BrowserSetupError, AssistedLoginError, CredentialStoreError) as exc:
         raise _fail(str(exc)) from exc
     except PlaywrightError as exc:
         # Closing the browser window while paused ends the session abruptly.
@@ -506,4 +560,78 @@ def recon(
         "src/condosys/portals/issnet/selectors.py a partir desse material."
     )
     if login_failed:
+        raise typer.Exit(1)
+
+
+# --- ADN (national NFS-e data environment) -------------------------------------------------
+
+
+@app.command("adn-test")
+def adn_test(
+    condominio: Annotated[
+        str | None,
+        typer.Argument(help="Condomínio (acesso DIRETO). Omitido: use --cert."),
+    ] = None,
+    cert: Annotated[
+        str | None,
+        typer.Option(
+            "--cert", help="Certificado em certs/ (consulta o CNPJ do próprio certificado)."
+        ),
+    ] = None,
+    nsu: Annotated[int, typer.Option("--nsu", help="NSU inicial (0 = desde o início).")] = 0,
+) -> None:
+    """Faz UMA consulta à API de distribuição do ADN e salva a resposta em debug/adn/."""
+    settings = get_settings()
+    cnpj: str | None = None
+    if condominio is not None:
+        condominium = resolve_condominium(settings, condominio)
+        certificate_file, cnpj = condominium.certificate, condominium.cnpj
+    elif cert is not None:
+        certificate_file = cert
+    else:
+        raise _fail("informe o condomínio ou --cert <arquivo.pfx>.")
+
+    try:
+        password = get_password(certificate_file)
+    except CredentialStoreError as exc:
+        raise _fail(str(exc)) from exc
+    if password is None:
+        raise _fail(f"senha de {certificate_file} não cadastrada (condosys cert add).")
+    try:
+        loaded = load_pfx(settings.certs_dir / certificate_file, password)
+    except CertificateError as exc:
+        raise _fail(str(exc)) from exc
+    if cnpj is not None and (
+        loaded.info.cnpj is None or not same_cnpj_root(cnpj, loaded.info.cnpj)
+    ):
+        raise _fail(
+            f"o ADN só aceita certificado com a mesma raiz de CNPJ do consultado. "
+            f"{certificate_file} é de {loaded.info.holder_name}; para condomínios por "
+            "procuração use o portal (login assistido)."
+        )
+
+    target = format_cnpj(cnpj or loaded.info.cnpj or "-")
+    console.print(f"ADN: consultando {target} com {loaded.info.holder_name}, NSU {nsu}...")
+    try:
+        response = fetch_dfe(settings.adn_base_url, loaded, nsu, cnpj=cnpj)
+    except AdnError as exc:
+        raise _fail(str(exc)) from exc
+
+    out_dir = settings.debug_dir / "adn" / f"{datetime.now():%Y%m%d-%H%M%S}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "resposta.txt").write_text(response.text, encoding="utf-8")
+    documents = decode_documents(response.payload)
+    for number, xml in enumerate(documents, start=1):
+        (out_dir / f"{number:03d}.xml").write_text(xml, encoding="utf-8")
+
+    table = Table(show_header=False, box=None)
+    table.add_row("HTTP", str(response.status_code))
+    table.add_row("URL", response.url.split("?")[0])
+    if isinstance(response.payload, dict):
+        table.add_row("Campos", ", ".join(map(str, response.payload)))
+    table.add_row("Documentos XML", str(len(documents)))
+    table.add_row("Salvo em", str(out_dir))
+    console.print(table)
+    if response.status_code >= 400:
+        console.print(f"[yellow]Resposta do ADN:[/] {response.text[:500]}")
         raise typer.Exit(1)

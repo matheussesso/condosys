@@ -47,6 +47,13 @@ class MemoryKeyring(KeyringBackend):
 
 
 @pytest.fixture(autouse=True)
+def automatic_login_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The assisted mode opens the real Chrome/Edge; tests opt in explicitly.
+    monkeypatch.setenv("CONDOSYS_LOGIN_MODE", "automatic")
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def memory_keyring() -> Iterator[MemoryKeyring]:
     previous = keyring.get_keyring()
     backend = MemoryKeyring()

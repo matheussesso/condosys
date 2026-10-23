@@ -221,6 +221,13 @@ def _make_portal_handler(ihub_origin: str) -> type[http.server.BaseHTTPRequestHa
             path, _, query = self.path.partition("?")
             if path == "/online/Login/Login.aspx":
                 body = FAKE_LOGIN.format(ihub_script=IHUB_SCRIPT.format(ihub=ihub_origin))
+            elif path == "/online/Login/Pessoa.aspx":  # a person logs in after a while
+                body = (
+                    "<html><body>login<script>setTimeout(function () {"
+                    "location.href = '/online/Default.aspx?ticket=' + encodeURIComponent("
+                    f"'THE SUN FULL CONDOMINIUM RESORT:{THE_SUN_CNPJ}');"
+                    "}, 1500);</script></body></html>"
+                )
             elif path == "/online/Login/SemScripts.aspx":  # scripts blocked (Cloudflare)
                 body = FAKE_LOGIN.format(ihub_script="")
             elif path == "/online/Default.aspx":

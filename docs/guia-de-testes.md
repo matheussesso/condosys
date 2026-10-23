@@ -25,17 +25,22 @@ Há dois tipos de teste:
 
 | tipo | o que cobre | precisa de certificado real? | acessa o portal? |
 |---|---|---|---|
-| **Automatizados** (`pytest`) | CNPJ, modelos, planilha, leitura de `.pfx`, cofre de senhas, CLI, login completo contra um portal falso local, gravador do recon | não (gera certificados de teste) | não |
-| **Manuais** | cadastro dos certificados reais, planilha real, login no ISSNet, recon | sim | sim |
+| **Automatizados** (`pytest`) | CNPJ, modelos, planilha, leitura de `.pfx`, cofre de senhas, instalação de certificado no navegador, CLI, login (automático e assistido) contra um portal falso local, cliente do ADN, gravador do recon | não (gera certificados de teste) | não |
+| **Manuais** | cadastro e instalação dos certificados reais, planilha real, login assistido no ISSNet, consulta ao ADN, recon | sim | sim |
 
 Os testes automatizados **nunca** tocam o cofre de senhas real nem o portal. O login
 real, a seleção do contribuinte na procuração e as telas internas do ISSNet só podem ser
 validados manualmente.
 
-Como funciona o login (resumo, detalhes no ADR-007 de [decisoes.md](decisoes.md)): o
-botão "Logar com certificado digital" abre um popup em `https://api.ihub.com.br/auth`;
-esse servidor pede o certificado na conexão TLS, o condosys entrega o `.pfx` ao
-navegador sem janela de escolha, o popup devolve um ticket e a página entra no portal.
+Como o condosys acessa as notas (detalhes nos ADR-007 e ADR-009 de
+[decisoes.md](decisoes.md)):
+
+- **Procuração (Sema, i9) → portal ISSNet com login assistido.** O botão "Logar com
+  certificado digital" abre um popup do iHub protegido pelo Cloudflare, que reprova
+  navegadores controlados por automação. Por isso **uma pessoa faz o login** no Chrome/Edge
+  comum, como hoje, e o condosys assume o navegador depois que o portal abre.
+- **Direto (certificado do próprio condomínio) → API oficial do ADN** (Ambiente de Dados
+  Nacional da NFS-e), sem navegador. O ADN não aceita certificado de procurador.
 
 ---
 
@@ -58,6 +63,13 @@ Se o Chromium não abrir por falta de bibliotecas do sistema:
 
 ```bash
 uv run playwright install-deps chromium        # usa sudo/apt
+```
+
+Para o login assistido, o Chrome do Linux usa o cofre NSS (`~/.pki/nssdb`); o comando
+`condosys cert install` precisa do `pk12util`:
+
+```bash
+sudo apt install libnss3-tools
 ```
 
 Cofre de senhas: o GNOME Keyring ou o KWallet precisa estar instalado e **desbloqueado**
@@ -87,11 +99,9 @@ uv run playwright install chromium
 uv run condosys init
 ```
 
-Alternativa ao Chromium baixado: usar o **Microsoft Edge** já instalado. No `.env`:
-
-```
-CONDOSYS_BROWSER_CHANNEL=msedge
-```
+O login assistido usa o **Microsoft Edge** ou o **Google Chrome** já instalados (no
+Windows, por padrão, o Edge). Para escolher, no `.env`: `CONDOSYS_BROWSER_CHANNEL=msedge`
+ou `chrome`.
 
 O cofre de senhas no Windows é o **Gerenciador de Credenciais** (Painel de Controle →
 Gerenciador de Credenciais → Credenciais do Windows; as entradas aparecem como
@@ -114,7 +124,7 @@ Os comandos podem ser rodados de qualquer subpasta do projeto (por exemplo, de d
 ### 3.1 Rodar
 
 ```bash
-uv run pytest                       # tudo (69 testes, ~10 s)
+uv run pytest                       # tudo (82 testes, ~30 s)
 uv run pytest -m "not browser"      # sem os testes de navegador (não precisa de Chromium)
 uv run pytest -m browser            # só os de navegador
 uv run pytest tests/test_models.py  # um arquivo
@@ -135,7 +145,7 @@ Tudo de uma vez:
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-Resultado esperado: `All checks passed!`, `Success: no issues found` e `69 passed`.
+Resultado esperado: `All checks passed!`, `Success: no issues found` e `82 passed`.
 Os testes de navegador são **pulados** (não falham) se o Chromium não estiver instalado.
 
 ### 3.2 O que cada arquivo testa
@@ -146,7 +156,10 @@ Os testes de navegador são **pulados** (não falham) se o Chromium não estiver
 | `tests/test_config_loader.py` | 7 | planilha de exemplo válida, acentos e variações (`Procuração`, `NÃO`, `Observações`), erros com linha e coluna, linhas em branco, nomes/CNPJs repetidos, colunas ausentes, busca de condomínio por nome/CNPJ |
 | `tests/test_certificates.py` | 9 | leitura do titular/CNPJ (campo ICP-Brasil e nome "EMPRESA:CNPJ"), certificado sem CNPJ, vencido, senha errada, arquivo ausente, `.pfx` legado (3DES) recodificado, listagem de `certs/`, cofre de senhas |
 | `tests/test_cli.py` | 8 | `init`, `cert add/list/remove`, senha errada, `config check` (OK e certificado DIRETO de outro CNPJ), planilha inválida, `login-test` sem senha, comandos rodados de subpasta |
-| `tests/test_browser.py` | 9 | ver 3.3 |
+| `tests/test_cert_store.py` | 4 | `cert install`: Linux (NSS/`pk12util`) e Windows (PowerShell), senha real nunca na linha de comando, arquivos temporários apagados, falhas |
+| `tests/test_adn.py` | 3 | ADN: mesma raiz de CNPJ, extração dos XML (base64+gzip) e consulta real com mTLS contra servidor local |
+| `tests/test_assisted_browser.py` | 4 | login assistido: achar o Chrome/Edge, esperar a aba entrar no portal, e o fluxo completo (navegador comum aberto, "pessoa" loga, condosys assume) |
+| `tests/test_browser.py` | 11 | ver 3.3 |
 
 ### 3.3 Como funcionam os testes de navegador
 
@@ -162,7 +175,9 @@ Os testes de navegador são **pulados** (não falham) se o Chromium não estiver
   - login completo e conferência do CNPJ na página;
   - certificado de outra AC → erro "handshake TLS" em menos de 6 s;
   - scripts de login ausentes (o que o Cloudflare causa em modo invisível) → erro
-    explicando o Cloudflare.
+    explicando o Cloudflare;
+  - verificação humana simulada → o login espera a pessoa;
+  - certificado configurado para a origem errada → mensagem com a linha certa do `.env`.
 - **Gravador do recon**: navega entre páginas com iframe, clica no botão "Capturar" e
   confere HTML, frames, screenshots, `index.jsonl` e `requests.log`.
 
@@ -170,7 +185,10 @@ Os testes de navegador são **pulados** (não falham) se o Chromium não estiver
 
 `tests/conftest.py` troca o keyring por um cofre em memória em **todos** os testes
 (fixture `memory_keyring`, automática). Nenhum teste lê ou grava no Gerenciador de
-Credenciais / Secret Service reais.
+Credenciais / Secret Service reais. Os testes também forçam o modo de login automático
+(fixture `automatic_login_mode`), para nunca abrirem o seu Chrome/Edge; o teste do login
+assistido usa o Chromium do Playwright em modo invisível. Nenhum teste instala certificado
+de verdade (as chamadas a `pk12util`/PowerShell são simuladas).
 
 ---
 
@@ -223,6 +241,19 @@ Casos para testar:
 
 Para apagar de vez um certificado: `cert remove <nome>` e depois apague o arquivo em `certs/`.
 
+**Instalar no navegador (login assistido).** Cada certificado de procuração precisa estar
+no cofre que o Chrome/Edge usa, uma vez por computador:
+
+```bash
+uv run condosys cert install sema.pfx
+uv run condosys cert install i9-brasil.pfx
+```
+
+Esperado: `Certificado instalado: <titular>` e o local (Windows: Certificados do Usuário
+Atual → Pessoal; Linux: `~/.pki/nssdb`). Feche e abra o navegador depois. No Windows, os
+certificados que o setor já usa no Edge provavelmente já estão instalados; rodar de novo
+não atrapalha. O Firefox usa outro cofre e não serve para o condosys.
+
 ### 4.3 Planilha de condomínios
 
 ```bash
@@ -261,26 +292,32 @@ Erros para provocar de propósito (e conferir a mensagem com linha e coluna):
 
 Desfaça as alterações depois.
 
-### 4.4 Login — acesso DIRETO
+### 4.4 Login assistido — acesso por PROCURAÇÃO
 
 Cada login consome saldo da licença do portal no iHub; não repita sem necessidade.
 
 ```bash
-uv run condosys login-test "the sun"
+uv run condosys login-test "Condomínio do Edifício Vivendas 107"
 ```
 
 O que acontece:
 
-1. Abre o navegador (janela visível) na página de login do ISSNet.
-2. Clica em "Logar com certificado digital".
-3. Abre o popup do iHub ("IHub — Autenticação com Certificado Digital"), **sem pedir
-   para escolher certificado**. "Não seguro" na barra de endereço é esperado: o
-   Playwright intermedeia a conexão para entregar o certificado.
-4. Se aparecer a caixa **"Confirme que é humano"** (Cloudflare), **marque-a**. O terminal
-   avisa e o condosys espera até 3 minutos (`CONDOSYS_HUMAN_CHECK_TIMEOUT_MS`). O sistema
-   não tenta pular essa verificação.
-5. O popup fecha sozinho, a página entra no portal, o condosys procura o CNPJ do
-   condomínio e tira um screenshot.
+1. O terminal mostra qual certificado escolher (ex.: `SEMA CONTABILIDADE E ASSESSORIA LTDA
+   (19.516.329/0001-38)`).
+2. Abre o **Chrome/Edge comum** (perfil próprio do condosys, separado do seu) na página de
+   login do ISSNet. O navegador não mostra aviso de automação: ele ainda não está sendo
+   controlado.
+3. **Você** faz o login como faria à mão:
+   1. clique em **Logar com certificado digital**;
+   2. escolha o certificado indicado no terminal;
+   3. se aparecer **Confirme que é humano**, marque a caixa.
+4. Quando o portal abrir (para procuração: a tela **Empresas**), o condosys percebe sozinho
+   e assume o navegador. Espera até 5 minutos (`CONDOSYS_ASSISTED_LOGIN_TIMEOUT_MS`).
+5. Procuração: o terminal pede para você escolher o condomínio na tela Empresas (filtre
+   pelo CNPJ, clique no ✓ verde) e apertar **Enter**. Isso será automatizado depois do
+   recon.
+6. O condosys confere o CNPJ do condomínio na página, tira o screenshot e fecha o
+   navegador.
 
 Resultado no terminal:
 
@@ -294,24 +331,33 @@ Resultado no terminal:
 Códigos de saída: `0` confirmado · `1` erro (mensagem explica) · `2` entrou, mas o CNPJ não
 apareceu na página (veja o screenshot; o recon vai mapear o cabeçalho).
 
-Se falhar, o screenshot do erro fica em `debug/login-test_<condominio>_<data-hora>_erro.png`.
+O perfil do navegador fica em `browser-profile/` (fora do git) e é reaproveitado nas
+próximas vezes. Se a escolha de certificado aparecer de novo, é normal.
 
-### 4.5 Login — acesso por PROCURAÇÃO
+### 4.5 API do ADN — acesso DIRETO
+
+Para condomínios com certificado próprio. Faz **uma** consulta à API oficial e salva a
+resposta; não usa navegador nem o saldo do iHub.
 
 ```bash
-uv run condosys login-test "<nome do condomínio da Sema>"
+uv run condosys adn-test "the sun"            # notas em que o condomínio aparece
+uv run condosys adn-test --cert sema.pfx      # notas do CNPJ do próprio certificado
+uv run condosys adn-test "the sun" --nsu 150  # a partir de um NSU
 ```
 
-Até o seletor de contribuinte ser mapeado no recon, o passo é manual:
+Esperado: tabela com o código HTTP, os campos da resposta, quantos XML vieram e a pasta
+`debug/adn/<data-hora>/` (`resposta.txt` e `NNN.xml`). Esse material serve para escrever o
+parsing da Fase 3.
 
-1. O login com o certificado da Sema acontece sozinho.
-2. O terminal mostra: `Passo manual: na janela do navegador, selecione o contribuinte ...`.
-3. Escolha o condomínio no seletor do cabeçalho do portal (ao lado da competência).
-4. Volte ao terminal e pressione **Enter**.
-5. O condosys confere o CNPJ do condomínio na página e tira o screenshot.
+Com um condomínio de procuração, o comando recusa: o ADN só aceita certificado com a
+mesma raiz de CNPJ do consultado.
 
-Anote como o seletor funciona (lista, campo de busca, nova página?), pois isso será
-automatizado.
+### 4.6 Modo automático (referência)
+
+`CONDOSYS_LOGIN_MODE=automatic` usa o navegador do Playwright com o `.pfx` entregue
+direto ao iHub, sem instalar nada. Hoje o Cloudflare reprova esse navegador mesmo quando a
+caixa é marcada ("A verificação de segurança falhou"). Fica disponível caso a proteção
+mude; não use no dia a dia.
 
 ---
 
@@ -327,7 +373,8 @@ uv run condosys recon "the sun" --trace    # também grava trace.zip (contém co
 
 ### 5.1 Como usar
 
-- O login é feito sozinho e o **Playwright Inspector** abre ao lado do navegador.
+- Faça o login na janela que abrir (como em 4.4). O condosys assume, salva a tela inicial
+  e abre o **Playwright Inspector** ao lado do navegador.
 - **Cada página carregada é salva sozinha** (HTML, frames e screenshot).
 - O botão **Capturar** (canto inferior direito da página) salva a tela atual. Use-o
   sempre que a tela mudar **sem recarregar**: depois de "Localizar", ao expandir "Filtros
@@ -402,6 +449,15 @@ Pasta `debug/recon/<AAAAMMDD-HHMMSS>/`:
 | `alerta do portal: Muitas requisições...` | iHub código 429 | aguarde alguns minutos |
 | `alerta do portal: Licença inválida ou JWT de sessão expirado` / `Domínio não autorizado` | iHub códigos 401/402 | recarregue e tente de novo; se repetir, registre em `docs/decisoes.md` |
 | `o login não foi concluído no tempo limite (a verificação 'Confirme que é humano' do iHub não foi concluída)` | ninguém marcou a caixa do Cloudflare no popup a tempo | rode de novo e marque a caixa; se precisar, aumente `CONDOSYS_HUMAN_CHECK_TIMEOUT_MS` |
+| `Chrome/Edge não encontrado` | navegador não instalado ou em local diferente | instale o Chrome/Edge ou informe `CONDOSYS_ASSISTED_BROWSER_PATH` no `.env` |
+| `o navegador fechou logo ao abrir` | já existe uma janela do navegador do condosys aberta | feche a janela anterior (perfil `browser-profile/`) e rode de novo |
+| `o navegador foi fechado antes de concluir o login` | a janela foi fechada durante o login | rode de novo e conclua o login |
+| `o login não foi concluído em N s` | ninguém concluiu o login a tempo | rode de novo; se precisar, aumente `CONDOSYS_ASSISTED_LOGIN_TIMEOUT_MS` |
+| o navegador não oferece o certificado | certificado não instalado no cofre do Chrome/Edge | `uv run condosys cert install <nome>` e reabra o navegador |
+| `pk12util não encontrado` | Linux sem as ferramentas NSS | `sudo apt install libnss3-tools` |
+| `A verificação de segurança falhou` (Cloudflare) | modo automático em uso | use `CONDOSYS_LOGIN_MODE=assisted` |
+| `o ADN só aceita certificado com a mesma raiz de CNPJ` | `adn-test` com condomínio de procuração | use o login assistido para esse condomínio |
+| `adn-test` com HTTP 4xx | certificado recusado, parâmetro ou NSU inválido | veja `debug/adn/<data-hora>/resposta.txt` e traga o conteúdo |
 | `o login não foi concluído no tempo limite` | portal lento ou mudou | aumente `CONDOSYS_NAVIGATION_TIMEOUT_MS`; rode o recon para ver a tela |
 | `o certificado não foi enviado para <origem>` | o portal passou a pedir certificado em outro endereço | inclua a origem em `CONDOSYS_ISSNET_CERT_ORIGINS` no `.env` |
 | login-test termina com código 2 | entrou, mas o CNPJ não aparece no texto da página | confira o screenshot; capture o cabeçalho no recon |
@@ -418,7 +474,8 @@ registre lá o erro exato.
 | terminal | PowerShell (ou Terminal do Windows) | bash |
 | caminhos com espaço | `"C:\Users\fulano\Downloads\THE SUN.pfx"` | `"/home/fulano/THE SUN.pfx"` |
 | cofre de senhas | Gerenciador de Credenciais (sem configuração) | Secret Service: GNOME Keyring/KWallet desbloqueado |
-| navegador | Chromium do Playwright ou Edge (`CONDOSYS_BROWSER_CHANNEL=msedge`) | Chromium do Playwright (`chrome` se o Google Chrome estiver instalado) |
+| navegador do login assistido | Edge (padrão) ou Chrome instalados | Google Chrome (padrão), Chromium ou Edge instalados |
+| cofre de certificados do navegador | Certificados do Usuário Atual → Pessoal (`cert install` usa PowerShell) | NSS `~/.pki/nssdb` (`cert install` usa `pk12util`, pacote `libnss3-tools`) |
 | bibliotecas do navegador | não precisa | às vezes `uv run playwright install-deps chromium` |
 | janela do navegador | sempre visível | precisa de sessão gráfica (X11 ou Wayland); não funciona por SSH sem tela |
 | senhas cadastradas | por usuário do Windows: cada funcionário cadastra no seu computador | por usuário do Linux |
@@ -478,9 +535,10 @@ Manual:
 - [ ] `cert add` de cada certificado mostra o titular e o CNPJ corretos
 - [ ] `cert list` mostra validade e senha `ok`; cores de vencimento corretas
 - [ ] `config check` valida a planilha real; erros provocados aparecem com linha e coluna
-- [ ] `login-test` DIRETO: entra sem janela de certificado e confirma o CNPJ (código 0)
-- [ ] `login-test` PROCURAÇÃO: entra com o certificado da contabilidade; seleção manual do
-      contribuinte funciona e o CNPJ é confirmado
+- [ ] `cert install` dos certificados de procuração; o Chrome/Edge passa a oferecê-los
+- [ ] `login-test` PROCURAÇÃO (assistido): login manual, condosys assume, seleção do
+      condomínio na tela Empresas e CNPJ confirmado (código 0)
+- [ ] `adn-test` DIRETO: resposta HTTP 200 e XML salvos em `debug/adn/`
 - [ ] `recon` DIRETO e PROCURAÇÃO: roteiro da seção 5.2 capturado
 - [ ] Testado no **Linux** e no **Windows**
 - [ ] Resultados levados para a Fase 2 (seção 5.4)

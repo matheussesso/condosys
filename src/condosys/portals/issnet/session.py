@@ -24,6 +24,7 @@ from playwright.sync_api import BrowserContext, Dialog, Page, Request
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from condosys.assisted_browser import assisted_browser
 from condosys.browser import launch_browser, new_certificate_context
 from condosys.models import AccessMode, Condominium
 from condosys.portals.issnet import selectors
@@ -79,9 +80,11 @@ def _without_query(url: str) -> str:
 class IssnetSession:
     """Page Object for the authenticated ISSNet environment."""
 
-    def __init__(self, page: Page, settings: Settings) -> None:
+    def __init__(self, page: Page, settings: Settings, *, assisted: bool = False) -> None:
         self.page = page
         self.settings = settings
+        # Assisted mode: a person already logged in on this page (see assisted_browser).
+        self.assisted = assisted
         self.popups: list[Page] = []
         self.popup_origins: list[str] = []
         self.human_check_shown = False
@@ -124,9 +127,18 @@ class IssnetSession:
     def login(self) -> None:
         """Opens the login page and logs in with the context's client certificate.
 
+        In assisted mode the person has already logged in; this only checks it.
+
         Raises:
             LoginError: If the portal rejects the certificate or the login does not finish.
         """
+        if self.assisted:
+            if not self._is_logged_in_url(self.page.url):
+                raise LoginError(
+                    f"a aba do navegador não está dentro do portal: {_without_query(self.page.url)}"
+                )
+            logger.info("Sessão assumida: %s", _without_query(self.page.url))
+            return
         logger.info("Abrindo %s", _without_query(self.settings.issnet_login_url))
         try:
             response = self.page.goto(self.settings.issnet_login_url, wait_until="load")
@@ -208,8 +220,10 @@ class IssnetSession:
     def _is_logged_in_url(self, url: str) -> bool:
         if selectors.LOGGED_IN_URL_PATTERN is not None:
             return re.search(selectors.LOGGED_IN_URL_PATTERN, url) is not None
-        # TODO: capturar via recon — until then, "left Login.aspx without an error page".
-        return "login.aspx" not in url.lower() and not url.startswith("chrome-error:")
+        # TODO: capturar via recon — until then, "left the /Login/ area without an error
+        # page" (after login the portal goes to /online/default/..., e.g. empresas.aspx).
+        path = urlsplit(url).path.lower()
+        return "/login/" not in path and not url.startswith("chrome-error:")
 
     def _raise_on_certificate_error_page(self, page: Page) -> None:
         text = self._certificate_error_text(page)
@@ -353,8 +367,23 @@ def issnet_session(
         on_context: Called with the new context before any page opens (e.g. recorders).
 
     Yields:
-        The session; call ``login()`` next.
+        The session; call ``login()`` next. In assisted mode (``settings.login_mode``) the
+        person logs in on the regular Chrome/Edge before this yields.
     """
+    if settings.login_mode == "assisted":
+        with assisted_browser(settings, settings.issnet_login_url) as browser:
+            context = browser.contexts[0]
+            if on_context is not None:
+                on_context(context)
+            pages = [
+                p for p in context.pages if _origin(p.url) == _origin(settings.issnet_login_url)
+            ]
+            page = pages[-1] if pages else context.pages[-1]
+            context.set_default_timeout(settings.timeout_ms)
+            context.set_default_navigation_timeout(settings.navigation_timeout_ms)
+            yield IssnetSession(page, settings, assisted=True)
+        return
+
     with launch_browser(settings, headless=headless) as browser:
         context = new_certificate_context(browser, settings, condominium.certificate)
         try:

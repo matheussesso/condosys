@@ -8,6 +8,9 @@ certs/*
 config/condominios.xlsx
 ~$*.xlsx
 
+# Perfil do navegador do login assistido (cookies de sessão)
+browser-profile/
+
 # Saídas e depuração (podem conter dados fiscais)
 output/
 logs/

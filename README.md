@@ -109,35 +109,43 @@ modo invisível, tempos de espera e pausas entre ações. **Nunca** coloque senh
 | `condosys cert add <arquivo.pfx>` | valida o certificado e guarda a senha no cofre |
 | `condosys cert list` | lista certificados, validade e situação da senha |
 | `condosys cert remove <nome>` | remove a senha do cofre |
+| `condosys cert install <nome>` | instala o certificado no Chrome/Edge (login assistido) |
 | `condosys config check` | valida `condominios.xlsx` e cruza com os certificados |
 | `condosys login-test <condomínio>` | faz login no ISSNet, confere o CNPJ na página e salva screenshot em `debug/` |
 | `condosys recon <condomínio>` | login + Playwright Inspector; salva HTML/screenshot de cada tela em `debug/recon/` |
+| `condosys adn-test <condomínio>` | uma consulta à API do ADN (acesso DIRETO); salva a resposta em `debug/adn/` |
 
 Todos os comandos aceitam `--help`. Use `uv run condosys -v <comando>` para log detalhado.
 
 `<condomínio>` aceita o nome (ou parte dele, sem acento/maiúscula) ou o CNPJ.
 
-## Login no ISSNet
+## Como o condosys acessa as notas
 
-O botão "Logar com certificado digital" do ISSNet abre uma janela do **iHub**
-(`api.ihub.com.br`), que pede o certificado. O condosys entrega o `.pfx` do condomínio
-(ou da i9/Sema, na procuração) direto ao navegador: **não aparece janela de escolha de
-certificado** e cada condomínio usa uma sessão nova, sem precisar fechar o navegador.
+- **Procuração (Sema, i9) — login assistido no portal ISSNet.** O login do portal passa por
+  uma janela do iHub protegida pelo Cloudflare, que barra navegadores automatizados. Então
+  **uma pessoa faz o login** no Chrome/Edge comum (escolhe o certificado, marca "Confirme
+  que é humano" se aparecer) e o condosys assume o navegador quando o portal abre. Um login
+  por certificado; cada login consome saldo da licença do portal no iHub.
+- **Direto (certificado do próprio condomínio) — API oficial do ADN** (Ambiente de Dados
+  Nacional da NFS-e), sem navegador.
 
-- A janela do navegador precisa ficar **visível**: no modo invisível o Cloudflare bloqueia
-  os scripts de login do portal.
-- Se a janela do iHub mostrar **"Confirme que é humano"**, marque a caixa: o condosys avisa
-  no terminal e espera (até 3 minutos).
-- Cada login consome saldo da licença do portal no iHub; evite repetir o `login-test` à toa.
-- Procuração: até o seletor de contribuinte ser mapeado pelo recon, o `login-test` pede
-  para você escolher o condomínio na janela e apertar Enter no terminal.
+Antes do primeiro login assistido, instale os certificados de procuração no navegador
+(uma vez por computador; no Linux precisa de `sudo apt install libnss3-tools`):
 
 ```bash
-uv run condosys login-test "the sun"
+uv run condosys cert install sema.pfx
 ```
 
-Resultado: tabela com a página aberta, se o CNPJ/nome do condomínio aparece e o caminho
-do screenshot. Código de saída 0 = confirmado, 1 = erro, 2 = entrou mas não achou o CNPJ.
+Teste:
+
+```bash
+uv run condosys login-test "Condomínio do Edifício Vivendas 107"   # procuração
+uv run condosys adn-test "the sun"                                  # direto
+```
+
+Resultado do `login-test`: tabela com a página aberta, se o CNPJ/nome do condomínio
+aparece e o caminho do screenshot. Código de saída 0 = confirmado, 1 = erro, 2 = entrou
+mas não achou o CNPJ. Passo a passo completo em [docs/guia-de-testes.md](docs/guia-de-testes.md).
 
 ### Recon (mapear as telas)
 
@@ -145,7 +153,7 @@ do screenshot. Código de saída 0 = confirmado, 1 = erro, 2 = entrou mas não a
 uv run condosys recon "the sun"
 ```
 
-1. O navegador faz o login e abre o **Playwright Inspector**.
+1. Faça o login na janela que abrir; o condosys assume e abre o **Playwright Inspector**.
 2. Navegue: Menu → Declaração de Serviços Contratados → Consulta de Notas Tomadas;
    preencha os filtros (NFS-e, datas da competência, Status Normal), clique em Localizar,
    abra uma nota (Visualizar), teste o ícone ao lado (XML?), vá para a página 2 da grade.

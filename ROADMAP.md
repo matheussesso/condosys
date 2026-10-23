@@ -25,7 +25,10 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [x] `condosys login-test <condomínio>` com screenshot em `debug/`
 - [x] `condosys recon <condomínio>`: Playwright Inspector + captura automática (HTML, frames, screenshot, requisições, downloads, botão "Capturar", `--trace`)
 - [x] Testes com servidores locais (mTLS, popup iHub falso, gravador)
-- [ ] **Teste manual no portal real** com certificado DIRETO e com procuração
+- [x] Primeiro teste real (Sema): certificado chega ao iHub; Cloudflare reprova o navegador automatizado (ADR-009)
+- [x] Login assistido: Chrome/Edge comum + certificado instalado (`cert install`), condosys assume após o login
+- [x] `condosys adn-test`: consulta única à API do ADN para acesso DIRETO
+- [ ] **Teste manual do login assistido** (procuração) e do `adn-test` (direto)
 - [ ] Preencher `selectors.py` e `docs/issnet-mapa.md` com o material do recon
 
 ## Fase 2 — Consulta de notas
@@ -39,8 +42,8 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 
 - [ ] Abrir cada nota ("Visualizar") e extrair `InvoiceDetail`
 - [ ] Verificar se o ícone ao lado de "Visualizar" baixa o **XML** — se sim, preferir XML a HTML
-- [ ] Investigar a **API do Ambiente de Dados Nacional (ADN) da NFS-e** via certificado
-      (dispensaria o navegador para as notas do DF, se disponíveis)
+- [ ] **ADN para acesso DIRETO**: paginação por NSU, parsing do XML nacional, filtro por competência
+      (a consulta e o download já existem em `adn.py`; procuração não é aceita pelo ADN)
 
 ## Fase 4 — Exportação Excel
 

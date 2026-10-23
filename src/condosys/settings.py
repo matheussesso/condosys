@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BrowserChannel = Literal["chromium", "chrome", "msedge"]
+LoginMode = Literal["assisted", "automatic"]
 
 
 class Settings(BaseSettings):
@@ -26,12 +27,24 @@ class Settings(BaseSettings):
 
     base_dir: Path = Field(default_factory=Path.cwd)
     certs_dir: Path = Path("certs")
+    # Profile of the browser opened for the assisted login (kept between runs).
+    browser_profile_dir: Path = Path("browser-profile")
     config_file: Path = Path("config/condominios.xlsx")
     output_dir: Path = Path("output")
     logs_dir: Path = Path("logs")
     debug_dir: Path = Path("debug")
 
     log_level: str = "INFO"
+
+    # "assisted": a person logs in on the regular Chrome/Edge (certificate installed in the
+    # system), then condosys takes over. "automatic": Playwright browser with the .pfx via
+    # client_certificates — blocked by the iHub Cloudflare check today (ADR-009).
+    login_mode: LoginMode = "assisted"
+    # Assisted login: browser executable (empty = find Chrome/Edge by browser_channel),
+    # extra command line arguments and how long to wait for the person to log in.
+    assisted_browser_path: Path | None = None
+    assisted_browser_args: list[str] = []
+    assisted_login_timeout_ms: int = Field(default=300_000, ge=1_000)
 
     headless: bool = False
     # "chromium" uses the browser downloaded by `playwright install chromium`;
@@ -52,6 +65,8 @@ class Settings(BaseSettings):
     # Origins that receive the client certificate (scheme://host[:port], no path). The
     # ISSNet login delegates the certificate check to the iHub popup (docs/decisoes.md).
     issnet_cert_origins: list[str] = ["https://api.ihub.com.br"]
+    # National NFS-e data environment (ADN), contributor distribution API.
+    adn_base_url: str = "https://adn.nfse.gov.br"
     # Re-encode the .pfx in memory with modern algorithms before handing it to the browser
     # (A1 certificates often use legacy RC2/3DES encryption that OpenSSL 3 rejects).
     reencode_pfx: bool = True
@@ -59,7 +74,14 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_paths(self) -> "Settings":
         self.base_dir = self.base_dir.expanduser().resolve()
-        for name in ("certs_dir", "config_file", "output_dir", "logs_dir", "debug_dir"):
+        for name in (
+            "certs_dir",
+            "browser_profile_dir",
+            "config_file",
+            "output_dir",
+            "logs_dir",
+            "debug_dir",
+        ):
             path: Path = getattr(self, name).expanduser()
             if not path.is_absolute():
                 setattr(self, name, self.base_dir / path)
