@@ -45,18 +45,31 @@ HEADER_TAXPAYER: str | None = None
 # TODO: capturar via recon — element with the current competence.
 HEADER_COMPETENCE: str | None = None
 
-# TODO: capturar via recon — taxpayer selector (proxy access, next to the competence).
-TAXPAYER_SELECTOR: str | None = None
+# --- Empresas (default/empresas.aspx) — company selection after a proxy login ------------
+# PROVISÓRIO: texts seen on screenshots of 23/10/2026 (docs/issnet-mapa.md, 1.1); no HTML
+# captured yet. The locators are built from these texts in session.py; replace them with
+# real ids once the recon captures this screen.
+
+COMPANY_SELECTION_URL_PART = "empresas.aspx"  # confirmed (URL after the proxy login)
+COMPANY_FILTER_CNPJ_LABEL = "CPF / CNPJ"
+# The search button shows the tooltip "Localizar"; it is the first button after "Ano".
+COMPANY_SEARCH_TITLE = "Localizar"
+COMPANY_SEARCH_AFTER_LABEL = "Ano"
+# Last clickable element of the grid row ("Selecione" column, green ✓).
+COMPANY_ROW_SELECT = "a, button, input[type=submit], input[type=image], input[type=button]"
 
 # TODO: capturar via recon — logout link/button.
 LOGOUT_BUTTON: str | None = None
 
 # --- Menu -> Declaração de Serviços Contratados -> Consulta de Notas Tomadas -------------
 
-# PROVISÓRIO: visible menu texts (rotina-fiscal.pdf, 4.6).
+# PROVISÓRIO: visible menu texts (rotina-fiscal.pdf, 4.6, and the menu screenshot of
+# 23/10/2026: "≡ Menu" button, "Buscar no Menu IssNet" search, expandable items).
 MENU_TEXT = "Menu"
 MENU_CONTRACTED_SERVICES_TEXT = "Declaração de Serviços Contratados"
 MENU_TAKEN_INVOICES_TEXT = "Consulta de Notas Tomadas"
+# Text expected on the "Consulta Notas Tomadas" screen (rotina-fiscal.pdf, 4.6).
+TAKEN_INVOICES_PAGE_TEXT = "Notas Tomadas"
 
 # TODO: capturar via recon — direct URL of "Consulta Notas Tomadas", if stable.
 TAKEN_INVOICES_URL: str | None = None

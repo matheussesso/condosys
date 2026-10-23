@@ -313,11 +313,17 @@ O que acontece:
    3. se aparecer **Confirme que é humano**, marque a caixa.
 4. Quando o portal abrir (para procuração: a tela **Empresas**), o condosys percebe sozinho
    e assume o navegador. Espera até 5 minutos (`CONDOSYS_ASSISTED_LOGIN_TIMEOUT_MS`).
-5. Procuração: o terminal pede para você escolher o condomínio na tela Empresas (filtre
-   pelo CNPJ, clique no ✓ verde) e apertar **Enter**. Isso será automatizado depois do
-   recon.
-6. O condosys confere o CNPJ do condomínio na página, tira o screenshot e fecha o
-   navegador.
+5. Procuração: o condosys **digita o CNPJ do condomínio** no filtro da tela Empresas,
+   clica na lupa (Localizar) e no ✓ verde da linha. Não mexa no navegador nessa hora.
+6. Confere o CNPJ do condomínio na página e abre **Menu → Declaração de Serviços
+   Contratados → Consulta de Notas Tomadas**.
+7. Tira o screenshot e fecha o navegador.
+
+Os passos 5 e 6 usam seletores **provisórios** (montados a partir dos textos visíveis nos
+prints, ainda sem o HTML real). Se algum falhar, o condosys salva a tela em
+`debug/falha-empresa_<data-hora>.html/.png` ou `debug/falha-menu_<data-hora>.html/.png`,
+pede para você fazer aquele passo à mão e apertar **Enter**, e segue. Traga esses arquivos
+para trocarmos pelo seletor real.
 
 Resultado no terminal:
 
@@ -326,10 +332,12 @@ Resultado no terminal:
 | Página / URL | onde o navegador parou (a URL é mostrada sem parâmetros) |
 | CNPJ na página | `sim` = entrou no ambiente do condomínio certo |
 | Nome na página | indicação extra; pode ser `não` se o portal abrevia o nome |
-| Screenshot | `debug/login-test_<condominio>_<data-hora>.png` |
+| Consulta de Notas Tomadas | `aberta` = chegou à tela de consulta |
+| Screenshot | `debug/login-test_<condominio>_<data-hora>.png` (tela final) |
 
-Códigos de saída: `0` confirmado · `1` erro (mensagem explica) · `2` entrou, mas o CNPJ não
-apareceu na página (veja o screenshot; o recon vai mapear o cabeçalho).
+Códigos de saída: `0` confirmado e consulta aberta · `1` erro (mensagem explica) · `2`
+entrou, mas o CNPJ não apareceu na página · `3` não conseguiu abrir Consulta de Notas
+Tomadas.
 
 O perfil do navegador fica em `browser-profile/` (fora do git) e é reaproveitado nas
 próximas vezes. Se a escolha de certificado aparecer de novo, é normal.
@@ -373,8 +381,9 @@ uv run condosys recon "the sun" --trace    # também grava trace.zip (contém co
 
 ### 5.1 Como usar
 
-- Faça o login na janela que abrir (como em 4.4). O condosys assume, salva a tela inicial
-  e abre o **Playwright Inspector** ao lado do navegador.
+- Faça o login na janela que abrir (como em 4.4). O condosys assume, salva a tela inicial,
+  seleciona a empresa, abre Consulta de Notas Tomadas (tudo gravado) e abre o
+  **Playwright Inspector** ao lado do navegador.
 - **Cada página carregada é salva sozinha** (HTML, frames e screenshot).
 - O botão **Capturar** (canto inferior direito da página) salva a tela atual. Use-o
   sempre que a tela mudar **sem recarregar**: depois de "Localizar", ao expandir "Filtros

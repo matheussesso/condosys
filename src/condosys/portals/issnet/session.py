@@ -17,10 +17,11 @@ import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from playwright.sync_api import BrowserContext, Dialog, Page, Request
+from playwright.sync_api import BrowserContext, Dialog, Locator, Page, Request
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -43,8 +44,28 @@ class LoginError(RuntimeError):
     """Raised when the certificate login does not succeed."""
 
 
-class ManualStepRequired(RuntimeError):  # noqa: N818 - it is a signal, not a failure
-    """Raised when a step has no captured selector yet and must be done by hand."""
+class NavigationError(RuntimeError):
+    """Raised when a portal screen does not behave as the (provisional) locators expect."""
+
+
+def save_page_snapshot(page: Page, directory: Path, stem: str) -> list[Path]:
+    """Saves the page HTML and a full screenshot (used when a navigation step fails).
+
+    Returns:
+        The saved files; empty if the page could not be captured.
+    """
+    saved: list[Path] = []
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        html_path = directory / f"{stem}.html"
+        html_path.write_text(page.content(), encoding="utf-8")
+        saved.append(html_path)
+        shot_path = directory / f"{stem}.png"
+        page.screenshot(path=shot_path, full_page=True, timeout=10_000)
+        saved.append(shot_path)
+    except (PlaywrightError, OSError) as exc:
+        logger.warning("Não foi possível salvar a tela (%s)", str(exc).splitlines()[0])
+    return saved
 
 
 @dataclass(frozen=True)
@@ -289,21 +310,90 @@ class IssnetSession:
         except PlaywrightError:
             return None
 
-    # --- taxpayer (proxy access) -------------------------------------------------------
+    # --- company selection (Empresas screen, proxy access) -----------------------------
 
-    def select_taxpayer(self, condominium: Condominium) -> None:
-        """Selects the condominium in the header taxpayer selector (proxy access).
+    def on_company_selection(self) -> bool:
+        """Whether the page is the "Empresas" screen shown after a proxy login."""
+        return selectors.COMPANY_SELECTION_URL_PART in self.page.url.lower()
+
+    def select_company(self, condominium: Condominium) -> None:
+        """Filters the "Empresas" grid by the condominium CNPJ and clicks its ✓.
+
+        Does nothing when the portal did not show the "Empresas" screen (direct access).
 
         Raises:
-            ManualStepRequired: While the selector has not been captured by the recon.
+            NavigationError: If the CNPJ is not found or a provisional locator fails; the
+                screen is saved to ``debug/`` so the real selector can be captured.
         """
-        if selectors.TAXPAYER_SELECTOR is None:
-            # TODO: capturar via recon — the selector next to the competence in the header.
-            raise ManualStepRequired(
-                f"selecione o contribuinte {condominium.name} ({condominium.cnpj_formatted}) "
-                "no cabeçalho do portal"
+        if not self.on_company_selection():
+            return
+        page = self.page
+        try:
+            field = self._input_after_label(selectors.COMPANY_FILTER_CNPJ_LABEL)
+            row = None
+            # The filter may expect digits or the formatted CNPJ: try both.
+            for value in (condominium.cnpj, condominium.cnpj_formatted):
+                field.fill(value)
+                self._company_search_button().click()
+                page.wait_for_load_state("load")
+                candidate = page.locator("tr").filter(has_text=condominium.cnpj_formatted)
+                try:
+                    candidate.first.wait_for(timeout=self.settings.timeout_ms // 3)
+                except PlaywrightTimeoutError:
+                    continue
+                row = candidate
+                break
+            if row is None:
+                raise self._navigation_error(
+                    "empresa",
+                    f"{condominium.cnpj_formatted} não aparece na lista de empresas do "
+                    "certificado (a procuração inclui este condomínio?)",
+                )
+            if row.count() != 1:
+                raise self._navigation_error(
+                    "empresa", f"{row.count()} linhas com o CNPJ {condominium.cnpj_formatted}"
+                )
+            row.locator(selectors.COMPANY_ROW_SELECT).last.click()
+            page.wait_for_url(
+                lambda url: selectors.COMPANY_SELECTION_URL_PART not in url.lower(),
+                timeout=self.settings.navigation_timeout_ms,
             )
-        raise NotImplementedError("Implementar após capturar TAXPAYER_SELECTOR no recon.")
+            page.wait_for_load_state("load")
+        except PlaywrightError as exc:
+            raise self._navigation_error("empresa", str(exc).splitlines()[0]) from exc
+        logger.info("Empresa selecionada: %s (%s)", condominium.name, condominium.cnpj_formatted)
+
+    def _input_after_label(self, label: str) -> Locator:
+        # PROVISÓRIO: by the visible label until the recon gives the real id.
+        by_label = self.page.get_by_label(label, exact=True)
+        if by_label.count() == 1:
+            return by_label
+        return self.page.locator(
+            f"xpath=//*[normalize-space(text())='{label}']/following::input[1]"
+        )
+
+    def _company_search_button(self) -> Locator:
+        # PROVISÓRIO: tooltip "Localizar" (title, or data-original-title once Bootstrap
+        # initializes the tooltip), else the first button after the "Ano" field.
+        title = selectors.COMPANY_SEARCH_TITLE
+        by_title = self.page.locator(f"[title='{title}'], [data-original-title='{title}']")
+        if by_title.count() >= 1:
+            return by_title.first
+        clickable = (
+            "self::button or self::a or "
+            "self::input[@type='submit' or @type='image' or @type='button']"
+        )
+        return self.page.locator(
+            f"xpath=//*[normalize-space(text())='{selectors.COMPANY_SEARCH_AFTER_LABEL}']"
+            f"/following::*[{clickable}][1]"
+        )
+
+    def _navigation_error(self, step: str, message: str) -> NavigationError:
+        saved = save_page_snapshot(
+            self.page, self.settings.debug_dir, f"falha-{step}_{datetime.now():%Y%m%d-%H%M%S}"
+        )
+        where = f" Tela salva em {saved[0].parent}/{saved[0].stem}.*" if saved else ""
+        return NavigationError(f"{message.rstrip('.')}.{where}")
 
     # --- checks ------------------------------------------------------------------------
 

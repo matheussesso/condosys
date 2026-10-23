@@ -28,7 +28,10 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [x] Primeiro teste real (Sema): certificado chega ao iHub; Cloudflare reprova o navegador automatizado (ADR-009)
 - [x] Login assistido: Chrome/Edge comum + certificado instalado (`cert install`), condosys assume após o login
 - [x] `condosys adn-test`: consulta única à API do ADN para acesso DIRETO
-- [ ] **Teste manual do login assistido** (procuração) e do `adn-test` (direto)
+- [x] Login assistido testado com a Sema: Chrome comum → tela Empresas (23/10/2026)
+- [x] `adn-test` em produção: HTTP 200, 50 NFS-e do DF (docs/adn.md)
+- [x] Seleção automática da empresa (filtro por CNPJ + ✓) e navegação até Consulta de Notas Tomadas — seletores provisórios
+- [ ] Validar a seleção automática e o menu no portal real; trocar pelos seletores do recon
 - [ ] Preencher `selectors.py` e `docs/issnet-mapa.md` com o material do recon
 
 ## Fase 2 — Consulta de notas

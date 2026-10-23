@@ -25,7 +25,8 @@ from condosys.browser import BrowserSetupError, build_client_certificates, new_c
 from condosys.credentials import save_password
 from condosys.models import AccessMode, Condominium
 from condosys.portals.issnet import selectors
-from condosys.portals.issnet.session import IssnetSession, LoginError
+from condosys.portals.issnet.invoices_page import TakenInvoicesPage
+from condosys.portals.issnet.session import IssnetSession, LoginError, NavigationError
 from condosys.recon import PageRecorder
 from condosys.settings import Settings
 from tests.conftest import PFX_PASSWORD, THE_SUN_CNPJ, make_ca, make_certificate, write_pfx
@@ -215,6 +216,51 @@ window.ihubauth = function (token, callback) {{
 }};"""
 
 
+# Fake "Empresas" screen (proxy login), "≡ Menu" and "Consulta Notas Tomadas", shaped like
+# the screenshots of 23/10/2026. Labels are not tied to inputs, the search button only has
+# a Bootstrap tooltip, and each grid row ends with a ✓ link.
+FAKE_COMPANIES = {
+    THE_SUN_CNPJ: "THE SUN FULL CONDOMINIUM RESORT",
+    "11222333000181": "CONDOMINIO DO BLOCO B DA SQS 302",
+}
+FAKE_EMPRESAS = """<html><head><title>Empresas</title></head><body>
+<h3>Empresas</h3><form method="get" action="/online/default/empresas.aspx">
+<div><label>Inscrição Municipal</label><input name="im"></div>
+<div><label>CPF / CNPJ</label><input name="doc"></div>
+<div><label>Mês</label><select name="mes"><option>Setembro</option></select></div>
+<div><label>Ano</label><select name="ano"><option>2026</option></select></div>
+<a href="#" data-original-title="Localizar"
+   onclick="this.closest('form').submit(); return false;"><i>&#128269;</i></a>
+</form><p>Selecione a Empresa</p><table>
+<tr><th>Nome / Razão Social</th><th>CPF/CNPJ</th><th>Selecione</th></tr>{rows}</table>
+<a href="#">1</a> <a href="#">2</a></body></html>"""
+FAKE_PRINCIPAL = """<html><head><title>ISSNet On-Line</title></head><body>
+<a href="#" id="btnMenu"
+   onclick="document.getElementById('menu').style.display='block'; return false;">
+   <i class="fa fa-bars"></i> Menu</a>
+<div>Contribuinte: {name} - {cnpj}</div>
+<div id="menu" style="display:none"><input placeholder="Buscar no Menu IssNet">
+<a href="#" onclick="document.getElementById('sub').style.display='block'; return false;">
+   Declaração de Serviços Contratados</a>
+<div id="sub" style="display:none"><a href="#">Incluir</a>
+<a href="/online/NotaFiscal/ConsultaTomadas.aspx">Consulta de Notas Tomadas</a></div>
+<a href="#">Guias de Recolhimento</a></div></body></html>"""
+
+
+def _company_rows(query: str) -> str:
+    wanted = "".join(c for c in query if c.isalnum())
+    rows = []
+    for cnpj, name in FAKE_COMPANIES.items():
+        if wanted and wanted != cnpj:
+            continue
+        formatted = f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
+        rows.append(
+            f"<tr><td>{name}</td><td>{formatted}</td><td>"
+            f"<a href='/online/default/principal.aspx?cnpj={cnpj}'>&#10003;</a></td></tr>"
+        )
+    return "".join(rows)
+
+
 def _make_portal_handler(ihub_origin: str) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -227,6 +273,17 @@ def _make_portal_handler(ihub_origin: str) -> type[http.server.BaseHTTPRequestHa
                     "location.href = '/online/Default.aspx?ticket=' + encodeURIComponent("
                     f"'THE SUN FULL CONDOMINIUM RESORT:{THE_SUN_CNPJ}');"
                     "}, 1500);</script></body></html>"
+                )
+            elif path == "/online/default/empresas.aspx":
+                doc = urllib.parse.parse_qs(query).get("doc", [""])[0]
+                body = FAKE_EMPRESAS.format(rows=_company_rows(doc))
+            elif path == "/online/default/principal.aspx":
+                cnpj = urllib.parse.parse_qs(query).get("cnpj", [""])[0]
+                body = FAKE_PRINCIPAL.format(name=FAKE_COMPANIES.get(cnpj, "?"), cnpj=cnpj)
+            elif path == "/online/NotaFiscal/ConsultaTomadas.aspx":
+                body = (
+                    "<html><head><title>Consulta Notas Tomadas</title></head><body>"
+                    "<h3>Consulta Notas Tomadas</h3><p>Dados da Consulta</p></body></html>"
                 )
             elif path == "/online/Login/SemScripts.aspx":  # scripts blocked (Cloudflare)
                 body = FAKE_LOGIN.format(ihub_script="")
@@ -471,5 +528,81 @@ def test_issnet_login_waits_for_human_check(
         assert session.human_check_shown
         assert "Confirme que é humano" in caplog.text
         assert session.check_identity(THE_SUN).confirmed
+    finally:
+        context.close()
+
+
+# --- Empresas screen and menu (provisional locators) ----------------------------------------
+
+
+@pytest.fixture
+def plain_portal() -> Iterator[str]:
+    server = http.server.ThreadingHTTPServer(
+        ("localhost", 0), _make_portal_handler("https://ihub.invalid")
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://localhost:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def _plain_settings(tmp_path: Path, portal: str) -> Settings:
+    return Settings(
+        base_dir=tmp_path,
+        issnet_login_url=f"{portal}/online/Login/Login.aspx",
+        timeout_ms=3_000,
+        navigation_timeout_ms=5_000,
+        slow_mo_ms=0,
+    )
+
+
+def test_select_company_and_open_taken_invoices(
+    browser: Browser, plain_portal: str, tmp_path: Path
+) -> None:
+    settings = _plain_settings(tmp_path, plain_portal)
+    context = browser.new_context()
+    try:
+        page = context.new_page()
+        page.goto(f"{plain_portal}/online/default/empresas.aspx?x=1")
+        session = IssnetSession(page, settings)
+        assert session.on_company_selection()
+
+        session.select_company(THE_SUN)
+
+        assert "principal.aspx" in page.url
+        assert session.check_identity(THE_SUN).confirmed
+        TakenInvoicesPage(page, settings.debug_dir).open()
+        assert page.url.endswith("/online/NotaFiscal/ConsultaTomadas.aspx")
+    finally:
+        context.close()
+
+
+def test_select_company_not_in_list_saves_screen(
+    browser: Browser, plain_portal: str, tmp_path: Path
+) -> None:
+    settings = _plain_settings(tmp_path, plain_portal)
+    other = THE_SUN.model_copy(update={"cnpj": "03608642000166", "name": "Vivendas 107"})
+    context = browser.new_context()
+    try:
+        page = context.new_page()
+        page.goto(f"{plain_portal}/online/default/empresas.aspx")
+        with pytest.raises(NavigationError, match="não aparece na lista"):
+            IssnetSession(page, settings).select_company(other)
+        assert list(settings.debug_dir.glob("falha-empresa_*.html"))
+        assert list(settings.debug_dir.glob("falha-empresa_*.png"))
+    finally:
+        context.close()
+
+
+def test_menu_failure_saves_screen(browser: Browser, plain_portal: str, tmp_path: Path) -> None:
+    settings = _plain_settings(tmp_path, plain_portal)
+    context = browser.new_context()
+    context.set_default_timeout(1_000)
+    try:
+        page = context.new_page()
+        page.goto(f"{plain_portal}/online/NotaFiscal/Inexistente.aspx")
+        with pytest.raises(NavigationError, match="Consulta de Notas Tomadas"):
+            TakenInvoicesPage(page, settings.debug_dir).open()
+        assert list(settings.debug_dir.glob("falha-menu_*.html"))
     finally:
         context.close()

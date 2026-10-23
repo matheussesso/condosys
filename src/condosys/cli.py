@@ -37,10 +37,12 @@ from condosys.credentials import CredentialStoreError, delete_password, get_pass
 from condosys.documents import format_cnpj
 from condosys.logging_setup import setup_logging
 from condosys.models import AccessMode, CertificateInfo, Condominium
+from condosys.portals.issnet import selectors
+from condosys.portals.issnet.invoices_page import TakenInvoicesPage
 from condosys.portals.issnet.session import (
     IssnetSession,
     LoginError,
-    ManualStepRequired,
+    NavigationError,
     issnet_session,
     needs_taxpayer_selection,
 )
@@ -403,19 +405,42 @@ def _describe(settings: Settings, condominium: Condominium) -> None:
     )
 
 
-def _select_taxpayer(session: IssnetSession, condominium: Condominium, interactive: bool) -> None:
-    if not needs_taxpayer_selection(condominium):
+def _select_company(session: IssnetSession, condominium: Condominium, interactive: bool) -> None:
+    """Selects the condominium on the "Empresas" screen, falling back to a manual step."""
+    if not session.on_company_selection():
+        if needs_taxpayer_selection(condominium):
+            logger.warning("Procuração, mas o portal não abriu a tela Empresas.")
         return
     try:
-        session.select_taxpayer(condominium)
-    except ManualStepRequired as exc:
+        session.select_company(condominium)
+        return
+    except NavigationError as exc:
         if not interactive:
-            raise _fail(f"passo manual necessário ({exc}); rode sem --headless.") from exc
-        console.print(
-            f"\n[bold yellow]Passo manual:[/] na janela do navegador, {exc}.\n"
-            "(O seletor ainda não foi capturado; o recon vai permitir automatizar isso.)"
-        )
-        console.input("Depois de selecionar, pressione [bold]Enter[/] aqui... ")
+            raise _fail(str(exc)) from exc
+        console.print(f"\n[bold yellow]Não consegui selecionar a empresa sozinho:[/] {exc}")
+    console.print(
+        f"[bold yellow]Passo manual:[/] na tela Empresas, filtre pelo CNPJ "
+        f"{condominium.cnpj_formatted} e clique no ✓ de {condominium.name}."
+    )
+    console.input("Depois de selecionar, pressione [bold]Enter[/] aqui... ")
+
+
+def _open_taken_invoices(settings: Settings, session: IssnetSession, interactive: bool) -> bool:
+    """Opens "Consulta de Notas Tomadas"; returns whether the screen is open."""
+    page = TakenInvoicesPage(session.page, settings.debug_dir)
+    try:
+        page.open()
+        return True
+    except NavigationError as exc:
+        console.print(f"\n[bold yellow]Não consegui abrir Consulta de Notas Tomadas:[/] {exc}")
+        if not interactive:
+            return False
+    console.print(
+        "[bold yellow]Passo manual:[/] abra Menu → Declaração de Serviços Contratados → "
+        "Consulta de Notas Tomadas."
+    )
+    console.input("Depois de abrir, pressione [bold]Enter[/] aqui... ")
+    return selectors.TAKEN_INVOICES_PAGE_TEXT in session.page.content()
 
 
 @app.command("login-test")
@@ -440,8 +465,9 @@ def login_test(
                 shot = session.screenshot(settings.debug_dir / f"{base_name}_erro.png")
                 console.print(f"Screenshot do erro: {shot}")
                 raise
-            _select_taxpayer(session, condominium, interactive=not headless)
+            _select_company(session, condominium, interactive=not headless)
             check = session.check_identity(condominium)
+            invoices_open = _open_taken_invoices(settings, session, interactive=not headless)
             shot = session.screenshot(settings.debug_dir / f"{base_name}.png")
             title = session.page.title()
             url = session.page.url
@@ -458,6 +484,9 @@ def login_test(
         "[green]sim[/]" if check.cnpj_found else "[red]não[/]",
     )
     table.add_row("Nome na página", "[green]sim[/]" if check.name_found else "[yellow]não[/]")
+    table.add_row(
+        "Consulta de Notas Tomadas", "[green]aberta[/]" if invoices_open else "[red]não abriu[/]"
+    )
     table.add_row("Screenshot", str(shot))
     console.print(table)
     if not check.confirmed:
@@ -466,7 +495,12 @@ def login_test(
             "Confira o screenshot; rode o recon para mapear o cabeçalho."
         )
         raise typer.Exit(2)
-    console.print("[bold green]Login confirmado no ambiente do condomínio.[/]")
+    if not invoices_open:
+        raise typer.Exit(3)
+    console.print(
+        "[bold green]Login confirmado no ambiente do condomínio e "
+        "Consulta de Notas Tomadas aberta.[/]"
+    )
 
 
 def _wait_until_closed(context: BrowserContext, recorder: PageRecorder) -> None:
@@ -519,11 +553,10 @@ def recon(
             if session.assisted:
                 # The pages before the takeover were not recorded; save the current one.
                 recorder.capture(session.page, "inicial")
-            if not login_failed and needs_taxpayer_selection(condominium):
-                console.print(
-                    f"[bold yellow]Procuração:[/] selecione {condominium.name} "
-                    f"({condominium.cnpj_formatted}) no cabeçalho do portal."
-                )
+            if not login_failed:
+                # The automatic steps are recorded too (Empresas filter, menu, query screen).
+                _select_company(session, condominium, interactive=True)
+                _open_taken_invoices(settings, session, interactive=False)
             console.print(
                 "\n[bold]Recon em andamento[/]\n"
                 f"  - Tudo é salvo em {out_dir}\n"

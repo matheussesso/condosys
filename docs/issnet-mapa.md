@@ -58,8 +58,13 @@ Seletores ainda não capturados — só o que aparece na tela:
 | cabeçalho | nome do certificado ("Sema Contabilidade e..."), "Sair", "Acessado em: dd/mm/aaaa hh:mm:ss" | ❌ |
 
 Consequências: a seleção do contribuinte da procuração é uma **tela própria** (não um
-seletor no cabeçalho); a competência provavelmente já é definida aqui. Filtrar por CNPJ +
-Localizar + Selecione deve bastar para automatizar (Fase 1/2, após o recon).
+seletor no cabeçalho); a competência provavelmente já é definida aqui.
+
+Automação atual (PROVISÓRIA, `session.select_company`): campo após o texto "CPF / CNPJ"
+(`get_by_label` ou `following::input[1]`), CNPJ só com dígitos e, se não achar, formatado;
+botão com `title`/`data-original-title` = "Localizar" (ou o primeiro botão após "Ano");
+linha `tr` que contém o CNPJ formatado → último link/botão da linha (✓). Em falha, a tela
+vai para `debug/falha-empresa_*`.
 
 ## 2. Cabeçalho (após login)
 
@@ -74,9 +79,11 @@ Localizar + Selecione deve bastar para automatizar (Fase 1/2, após o recon).
 
 | elemento | seletor | status |
 |---|---|---|
-| "Menu" | `get_by_text("Menu")` | 🟡 |
-| "Declaração de Serviços Contratados" | | 🟡 texto |
-| "Consulta de Notas Tomadas" | | 🟡 texto |
+| "≡ Menu" | botão/link com nome "Menu" (só clicado se o menu estiver fechado) | 🟡 |
+| busca do menu | campo "Buscar no Menu IssNet" | 🟡 print |
+| "Declaração de Serviços Contratados" | `get_by_text(..., exact=True)` (expande o submenu) | 🟡 print |
+| "Consulta de Notas Tomadas" | `get_by_text(..., exact=True)` | 🟡 print |
+| tela aberta | texto "Notas Tomadas" na página | 🟡 |
 | URL direta da tela (se estável) | | ❌ |
 
 ## 4. Consulta Notas Tomadas — filtros
