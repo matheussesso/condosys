@@ -97,3 +97,23 @@ def test_login_test_without_password_explains(settings: Settings) -> None:
         pytest.skip("Chromium indisponível")
     assert result.exit_code == 1, result.output
     assert "senha do certificado the-sun.pfx não cadastrada" in result.output
+
+
+def test_commands_work_from_a_subfolder(
+    settings: Settings, the_sun_pfx: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from condosys.settings import get_settings
+
+    (settings.base_dir / ".env").write_text("", encoding="utf-8")
+    settings.certs_dir.mkdir()
+    monkeypatch.delenv("CONDOSYS_BASE_DIR")
+    monkeypatch.chdir(settings.certs_dir)
+    get_settings.cache_clear()
+    target = settings.certs_dir / "the-sun.pfx"
+    target.write_bytes(the_sun_pfx.read_bytes())
+
+    result = runner.invoke(app, ["cert", "add", str(target)], input=f"{PFX_PASSWORD}\n")
+    assert result.exit_code == 0, result.output
+    assert not (settings.certs_dir / "certs").exists()
+    assert not (settings.certs_dir / "logs").exists()
+    assert "Arquivo copiado" not in result.output

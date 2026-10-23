@@ -1,6 +1,7 @@
 """Reading A1 (``.pfx``/``.p12``) certificates: holder, CNPJ, issuer and validity."""
 
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,7 +53,11 @@ def load_pfx(path: Path, password: str) -> LoadedCertificate:
     except OSError as exc:
         raise CertificateError(f"não foi possível ler {path}: {exc}") from exc
     try:
-        key, cert, chain = pkcs12.load_key_and_certificates(data, password.encode("utf-8"))
+        with warnings.catch_warnings():
+            # Some CAs export BER instead of DER; cryptography parses it but warns.
+            # The browser always gets a DER re-encoding (reencode_pfx), so this is harmless.
+            warnings.filterwarnings("ignore", message=r".*could not be parsed as DER.*")
+            key, cert, chain = pkcs12.load_key_and_certificates(data, password.encode("utf-8"))
     except ValueError as exc:
         raise CertificateError(
             f"não foi possível abrir {path.name}: senha incorreta ou arquivo inválido"

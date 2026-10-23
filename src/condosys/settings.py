@@ -1,5 +1,6 @@
 """General settings loaded from environment variables and ``.env``."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -68,7 +69,29 @@ class Settings(BaseSettings):
         return self.config_file.with_name("condominios.example.xlsx")
 
 
+def find_project_dir(start: Path | None = None) -> Path:
+    """Finds the project folder from ``start`` (default: cwd) or any parent.
+
+    The project folder is the first one with a ``.env``/``.env.example`` file or with both
+    ``certs/`` and ``config/``, so commands work from subfolders such as ``certs/``.
+    Falls back to ``start`` itself.
+    """
+    origin = (start or Path.cwd()).resolve()
+    for candidate in (origin, *origin.parents):
+        if (candidate / ".env").is_file() or (candidate / ".env.example").is_file():
+            return candidate
+        if (candidate / "certs").is_dir() and (candidate / "config").is_dir():
+            return candidate
+    return origin
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Returns the process-wide settings instance."""
-    return Settings()
+    """Returns the process-wide settings instance.
+
+    ``CONDOSYS_BASE_DIR`` wins; otherwise the project folder is searched upwards from the
+    current directory, and its ``.env`` is the one loaded.
+    """
+    explicit = os.environ.get("CONDOSYS_BASE_DIR")
+    base_dir = Path(explicit) if explicit else find_project_dir()
+    return Settings(base_dir=base_dir, _env_file=base_dir / ".env")  # type: ignore[call-arg]

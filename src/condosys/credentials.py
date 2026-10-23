@@ -41,7 +41,7 @@ def save_password(certificate_file: str, password: str) -> None:
         keyring.set_password(SERVICE_NAME, _account(certificate_file), password)
     except KeyringError as exc:
         raise _unavailable(exc) from exc
-    logger.info("Senha do certificado %s salva no cofre do sistema.", certificate_file)
+    logger.debug("Senha do certificado %s salva no cofre do sistema.", certificate_file)
 
 
 def get_password(certificate_file: str) -> str | None:
@@ -76,5 +76,5 @@ def delete_password(certificate_file: str) -> bool:
         return False
     except KeyringError as exc:
         raise _unavailable(exc) from exc
-    logger.info("Senha do certificado %s removida do cofre do sistema.", certificate_file)
+    logger.debug("Senha do certificado %s removida do cofre do sistema.", certificate_file)
     return True
