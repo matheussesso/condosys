@@ -19,6 +19,17 @@ comando de teste: `condosys adn-test`.
 - A Sema aparece como **tomadora** nas 50; emissões de 09/2023 a 12/2025 (o lote começa
   pelo NSU mais antigo — é preciso paginar até o fim para chegar às notas recentes).
 
+## Primeira sincronização completa — 23/10/2026
+
+`condosys adn-notas --cert sema.pfx -c 09/2025`: 91 documentos em 2 consultas (NSU 0 e
+50; o segundo lote veio com 41 e a sincronização terminou), 3 notas tomadas em 09/2025,
+listadas corretamente.
+
+**Limite confirmado do caminho ADN:** só funciona com o certificado do próprio CNPJ (ou
+mesma raiz). O certificado da Sema não consulta os condomínios por procuração. Para eles,
+as opções são: certificado e-CNPJ de cada condomínio (passa a usar o ADN), resposta do
+suporte do ISSNet sobre o webservice (ADR-010) ou consulta manual.
+
 ## Sincronização e uso (implementado)
 
 - `adn.sync_documents`: chama `GET /contribuintes/DFe/{NSU}?lote=true` a partir do último
