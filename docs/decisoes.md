@@ -154,6 +154,29 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
 - **Consequência:** a coleta não roda sem uma pessoa para o login de cada certificado; a
   Fase 4 deve agrupar condomínios por certificado.
 
+## ADR-010 — iHub bloqueia acesso automatizado: automação do portal suspensa
+
+- **Contexto (23/10/2026, 00:56):** no login assistido (Chrome comum aberto pelo
+  condosys, login feito pela pessoa), o popup do iHub respondeu: *"Acesso automatizado
+  deve usar o webservice do sistema. Se o uso é legítimo, informe ao suporte o código a
+  seguir. Ref.: 568F9D19"*. Antes disso, o Cloudflare já reprovava o navegador do
+  Playwright (ADR-009). O operador declarou a política: automação deve usar o webservice.
+- **Decisão:** respeitar o bloqueio. Nenhuma técnica para esconder a automação ou
+  contornar a verificação. `login-test` e `recon` ficam desativados por padrão
+  (`CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED=false`) e explicam o motivo. O código do
+  portal (seleção da empresa, consulta) fica guardado para o caso de o suporte autorizar.
+- **Caminhos legítimos:**
+  1. **ADN (API oficial)** para condomínios com certificado próprio — já funciona
+     (docs/adn.md).
+  2. **Suporte do ISSNet/NotaControl**, citando a Ref. 568F9D19: perguntar qual
+     webservice serve para consultar notas **tomadas** por um procurador (certificado da
+     contabilidade) e se o uso pretendido pode ser autorizado.
+  3. **Certificados dos condomínios** (ou outro mecanismo que o ADN aceite) para levar os
+     condomínios de procuração ao ADN.
+  4. Enquanto isso, a consulta no portal continua manual (navegador comum, sem condosys).
+- **Consequência:** a Fase 2 (consulta pelo portal) fica bloqueada até haver resposta do
+  suporte; a prioridade passa a ser o ADN (paginação, parsing do XML nacional, Excel).
+
 ## ADR-008 — Gravação do recon
 
 - **Decisão:** `PageRecorder` salva HTML (página + frames) e screenshot a cada evento

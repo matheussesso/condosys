@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # system), then condosys takes over. "automatic": Playwright browser with the .pfx via
     # client_certificates — blocked by the iHub Cloudflare check today (ADR-009).
     login_mode: LoginMode = "assisted"
+    # The iHub answered "Acesso automatizado deve usar o webservice do sistema" (ADR-010):
+    # portal automation stays off unless the portal support authorizes it in writing.
+    issnet_automation_authorized: bool = False
     # Assisted login: browser executable (empty = find Chrome/Edge by browser_channel),
     # extra command line arguments and how long to wait for the person to log in.
     assisted_browser_path: Path | None = None

@@ -121,3 +121,17 @@ def test_commands_work_from_a_subfolder(
     assert not (settings.certs_dir / "certs").exists()
     assert not (settings.certs_dir / "logs").exists()
     assert "Arquivo copiado" not in result.output
+
+
+def test_portal_automation_is_off_by_default(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from condosys.settings import get_settings
+
+    monkeypatch.delenv("CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED")
+    get_settings.cache_clear()
+    create_example_workbook(settings.config_file)
+    for command in (["login-test", "the sun"], ["recon", "the sun"]):
+        result = runner.invoke(app, command, env={"COLUMNS": "200"})
+        assert result.exit_code == 1
+        assert "568F9D19" in result.output

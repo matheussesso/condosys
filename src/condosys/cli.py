@@ -380,6 +380,21 @@ def _file_slug(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "-", plain).strip("-").lower()[:40] or "condominio"
 
 
+IHUB_BLOCK_NOTICE = (
+    "Automação do portal ISSNet desativada. Em 23/10/2026 o iHub (login do portal) "
+    'respondeu: "Acesso automatizado deve usar o webservice do sistema. Se o uso é '
+    'legítimo, informe ao suporte o código a seguir. Ref.: 568F9D19". O condosys não '
+    "contorna esse bloqueio (docs/decisoes.md, ADR-010). Caminhos: API do ADN para acesso "
+    "DIRETO (condosys adn-test) e contato com o suporte do ISSNet sobre o webservice. Só "
+    "use CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED=true se o suporte autorizar por escrito."
+)
+
+
+def _ensure_portal_automation_allowed(settings: Settings) -> None:
+    if not settings.issnet_automation_authorized:
+        raise _fail(IHUB_BLOCK_NOTICE)
+
+
 def _describe(settings: Settings, condominium: Condominium) -> None:
     console.print(
         f"Condomínio: [bold]{condominium.name}[/] ({condominium.cnpj_formatted}) — "
@@ -453,6 +468,7 @@ def login_test(
 ) -> None:
     """Faz login no ISSNet com o certificado do condomínio e confere o ambiente."""
     settings = get_settings()
+    _ensure_portal_automation_allowed(settings)
     condominium = resolve_condominium(settings, condominio)
     _describe(settings, condominium)
     stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
@@ -531,6 +547,7 @@ def recon(
 ) -> None:
     """Faz login e abre o Playwright Inspector, salvando HTML + screenshot de cada tela."""
     settings = get_settings()
+    _ensure_portal_automation_allowed(settings)
     condominium = resolve_condominium(settings, condominio)
     _describe(settings, condominium)
     out_dir = new_recon_dir(settings.debug_dir)

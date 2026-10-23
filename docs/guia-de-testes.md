@@ -294,6 +294,11 @@ Desfaça as alterações depois.
 
 ### 4.4 Login assistido — acesso por PROCURAÇÃO
 
+> **Suspenso desde 23/10/2026 (ADR-010).** O iHub respondeu "Acesso automatizado deve
+> usar o webservice do sistema" (Ref. 568F9D19). `login-test` e `recon` recusam rodar
+> enquanto `CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED=false`. Só ligue com autorização escrita
+> do suporte do portal. O roteiro abaixo fica como referência.
+
 Cada login consome saldo da licença do portal no iHub; não repita sem necessidade.
 
 ```bash

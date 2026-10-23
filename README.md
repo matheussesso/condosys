@@ -121,6 +121,11 @@ Todos os comandos aceitam `--help`. Use `uv run condosys -v <comando>` para log 
 
 ## Como o condosys acessa as notas
 
+> **Importante (23/10/2026):** o iHub, que faz o login do ISSNet, bloqueou o acesso
+> automatizado e orientou usar o webservice do sistema (Ref. 568F9D19). A automação do
+> portal está **desligada** até o suporte autorizar (ver ADR-010 em
+> [docs/decisoes.md](docs/decisoes.md)). O caminho ativo é a API oficial do ADN.
+
 - **Procuração (Sema, i9) — login assistido no portal ISSNet.** O login do portal passa por
   uma janela do iHub protegida pelo Cloudflare, que barra navegadores automatizados. Então
   **uma pessoa faz o login** no Chrome/Edge comum (escolhe o certificado, marca "Confirme

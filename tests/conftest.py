@@ -50,6 +50,8 @@ class MemoryKeyring(KeyringBackend):
 def automatic_login_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     # The assisted mode opens the real Chrome/Edge; tests opt in explicitly.
     monkeypatch.setenv("CONDOSYS_LOGIN_MODE", "automatic")
+    # Tests drive local fake portals only.
+    monkeypatch.setenv("CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED", "true")
     get_settings.cache_clear()
 
 

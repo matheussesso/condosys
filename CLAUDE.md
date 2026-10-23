@@ -24,6 +24,7 @@ Antes de concluir qualquer mudança: `ruff check`, `ruff format`, `mypy` e `pyte
 - `cli.py` (Typer) → `services/` (orquestração) → `portals/issnet/` (Page Objects) + `parsers.py` (puro) → `exporters/`.
 - `browser.py`: um `BrowserContext` novo **por certificado**, com `client_certificates` do Playwright.
 - Login do ISSNet: popup `https://api.ihub.com.br/auth` pede o certificado no TLS (ADR-007). O Cloudflare reprova navegador automatizado: o padrão é o **login assistido** (`assisted_browser.py`, ADR-009) — pessoa loga no Chrome/Edge comum, condosys conecta via CDP depois. Nunca tentar contornar a verificação. Cada login debita saldo no iHub.
+- **ADR-010:** o iHub bloqueou o acesso automatizado ("deve usar o webservice", Ref. 568F9D19). Automação do portal desligada por padrão (`issnet_automation_authorized`). Nunca contornar; caminho é ADN ou webservice autorizado pelo suporte.
 - Acesso DIRETO: API oficial do ADN (`adn.py`), mTLS, certificado com mesma raiz de CNPJ. Layout real e mapeamento em `docs/adn.md`.
 - `recon.py`: gravador de páginas para o recon (`debug/recon/<timestamp>/`).
 - `certificates.py` (cryptography) lê `.pfx`; `credentials.py` (keyring) guarda senhas; `config_loader.py` lê `config/condominios.xlsx`.

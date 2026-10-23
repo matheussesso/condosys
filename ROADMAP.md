@@ -31,7 +31,9 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [x] Login assistido testado com a Sema: Chrome comum → tela Empresas (23/10/2026)
 - [x] `adn-test` em produção: HTTP 200, 50 NFS-e do DF (docs/adn.md)
 - [x] Seleção automática da empresa (filtro por CNPJ + ✓) e navegação até Consulta de Notas Tomadas — seletores provisórios
-- [ ] Validar a seleção automática e o menu no portal real; trocar pelos seletores do recon
+- [x] Seleção automática da empresa validada no portal real (23/10/2026); filtros da consulta confirmados no HTML
+- [ ] ~~Validar a consulta pelo portal~~ — **suspenso**: o iHub bloqueou acesso automatizado e pediu o webservice (ADR-010, Ref. 568F9D19)
+- [ ] Contatar o suporte do ISSNet com a Ref. 568F9D19 (webservice para notas tomadas via procuração)
 - [ ] Preencher `selectors.py` e `docs/issnet-mapa.md` com o material do recon
 
 ## Fase 2 — Consulta de notas
