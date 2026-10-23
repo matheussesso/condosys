@@ -235,6 +235,16 @@ FAKE_EMPRESAS = """<html><head><title>Empresas</title></head><body>
 </form><p>Selecione a Empresa</p><table>
 <tr><th>Nome / Razão Social</th><th>CPF/CNPJ</th><th>Selecione</th></tr>{rows}</table>
 <a href="#">1</a> <a href="#">2</a></td></tr></table></body></html>"""
+# Variant: the grid filters itself while typing and there is no "Localizar" button, so the
+# first clickable element after "Ano" is the ✓ of the (only) visible row.
+FAKE_EMPRESAS_AUTO = """<html><head><title>Empresas</title></head><body>
+<div><label>CPF / CNPJ</label><input name="doc" oninput="
+  var v = this.value.replace(/\\D/g, '');
+  document.querySelectorAll('tr.row').forEach(function (r) {{
+    r.style.display = r.textContent.replace(/\\D/g, '').indexOf(v) >= 0 ? '' : 'none';
+  }});"></div>
+<div><label>Ano</label><select name="ano"><option>2026</option></select></div>
+<table><tr><th>Nome</th><th>CPF/CNPJ</th><th>Selecione</th></tr>{rows}</table></body></html>"""
 # Shell like the real Default/Master.aspx: header with the company name only, "Sair",
 # and every screen inside <iframe name="iframe">.
 FAKE_MASTER = """<html><head><title>ISSNet On-Line - Nota Eletrônica</title></head><body>
@@ -253,7 +263,7 @@ def _company_rows(query: str) -> str:
             continue
         formatted = f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
         rows.append(
-            f"<tr><td>{name}</td><td>{formatted}</td><td>"
+            f"<tr class='row'><td>{name}</td><td>{formatted}</td><td>"
             f"<a href='/online/Default/Master.aspx?cnpj={cnpj}'>&#10003;</a></td></tr>"
         )
     return "".join(rows)
@@ -272,6 +282,8 @@ def _make_portal_handler(ihub_origin: str) -> type[http.server.BaseHTTPRequestHa
                     f"'THE SUN FULL CONDOMINIUM RESORT:{THE_SUN_CNPJ}');"
                     "}, 1500);</script></body></html>"
                 )
+            elif path == "/online/default/empresas.aspx" and "auto" in query:
+                body = FAKE_EMPRESAS_AUTO.format(rows=_company_rows(""))
             elif path == "/online/default/empresas.aspx":
                 doc = urllib.parse.parse_qs(query).get("doc", [""])[0]
                 body = FAKE_EMPRESAS.format(rows=_company_rows(doc))
@@ -578,7 +590,8 @@ def test_select_company_and_open_taken_invoices(
         assert check.selected_company_match
         assert check.confirmed
         assert check.header_name == FAKE_COMPANIES[THE_SUN_CNPJ]
-        assert list(settings.debug_dir.glob("empresas_*.html"))
+        assert list(settings.debug_dir.glob("empresas-inicio_*.html"))
+        assert list(settings.debug_dir.glob("empresas-filtrada_*.html"))
 
         invoices = TakenInvoicesPage(page, settings.debug_dir)
         invoices.open()
@@ -622,5 +635,28 @@ def test_taken_invoices_failure_saves_screen(
         with pytest.raises(NavigationError, match="Consulta de Notas Tomadas"):
             TakenInvoicesPage(page, settings.debug_dir).open()
         assert list(settings.debug_dir.glob("falha-menu_*.html"))
+    finally:
+        context.close()
+
+
+def test_select_company_when_the_click_already_selects(
+    browser: Browser, plain_portal: str, tmp_path: Path
+) -> None:
+    settings = _plain_settings(tmp_path, plain_portal)
+    # Second company in the list: a click on the first ✓ would pick the wrong one.
+    other = THE_SUN.model_copy(
+        update={"cnpj": "11222333000181", "name": "Condominio do Bloco B da SQS 302"}
+    )
+    context = browser.new_context()
+    try:
+        page = context.new_page()
+        page.goto(f"{plain_portal}/online/default/empresas.aspx?auto=1")
+        session = IssnetSession(page, settings)
+        session.select_company(other)
+        assert "/online/Default/Master.aspx" in page.url
+        check = session.check_identity(other)
+        assert check.header_name == FAKE_COMPANIES["11222333000181"]
+        assert check.confirmed  # header equals the spreadsheet name (accents/case ignored)
+        assert list(settings.debug_dir.glob("empresas-inicio_*.html"))
     finally:
         context.close()

@@ -329,62 +329,70 @@ class IssnetSession:
         """Filters the "Empresas" grid by the condominium CNPJ and clicks its ✓.
 
         Does nothing when the portal did not show the "Empresas" screen (direct access).
+        The screen is saved to ``debug/`` on arrival, so the provisional locators can be
+        replaced by the real ones.
 
         Raises:
-            NavigationError: If the CNPJ is not found or a provisional locator fails; the
-                screen is saved to ``debug/`` so the real selector can be captured.
+            NavigationError: If the CNPJ is not found or a provisional locator fails.
         """
         if not self.on_company_selection():
             return
         page = self.page
+        stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+        save_page_snapshot(page, self.settings.debug_dir, f"empresas-inicio_{stamp}")
         try:
             field = self._input_after_label(selectors.COMPANY_FILTER_CNPJ_LABEL)
-            row = None
             # The filter may expect digits or the formatted CNPJ: try both.
             for value in (condominium.cnpj, condominium.cnpj_formatted):
                 field.fill(value)
-                self._company_search_button().click()
+                self._search_companies(field)
                 page.wait_for_load_state("domcontentloaded")
-                # Innermost row only: the grid sits inside layout tables whose rows also
-                # "contain" the CNPJ text.
-                candidate = (
-                    page.locator("tr")
-                    .filter(has_text=condominium.cnpj_formatted)
-                    .filter(has_not=page.locator("tr"))
-                )
+                if self._left_company_selection(condominium):
+                    return
+                # Deepest row with the CNPJ: the grid sits inside layout tables whose rows
+                # also "contain" it, and those come first in the document.
+                row = page.locator("tr").filter(has_text=condominium.cnpj_formatted).last
                 try:
-                    candidate.first.wait_for(timeout=self.settings.timeout_ms // 3)
+                    row.wait_for(timeout=self.settings.timeout_ms // 3)
                 except PlaywrightTimeoutError:
+                    if self._left_company_selection(condominium):
+                        return
                     continue
-                row = candidate
-                break
-            if row is None:
-                raise self._navigation_error(
-                    "empresa",
-                    f"{condominium.cnpj_formatted} não aparece na lista de empresas do "
-                    "certificado (a procuração inclui este condomínio?)",
+                save_page_snapshot(page, self.settings.debug_dir, f"empresas-filtrada_{stamp}")
+                cells = row.locator("td")
+                if cells.count():
+                    self.selected_company_name = cells.first.inner_text().strip() or None
+                row.locator(selectors.COMPANY_ROW_SELECT).last.click()
+                page.wait_for_url(
+                    lambda url: selectors.COMPANY_SELECTION_URL_PART not in url.lower(),
+                    timeout=self.settings.navigation_timeout_ms,
+                    wait_until="domcontentloaded",
                 )
-            if row.count() != 1:
-                raise self._navigation_error(
-                    "empresa", f"{row.count()} linhas com o CNPJ {condominium.cnpj_formatted}"
+                logger.info(
+                    "Empresa selecionada: %s (%s)",
+                    self.selected_company_name,
+                    condominium.cnpj_formatted,
                 )
-            # Kept for debugging the provisional locators (debug/ is git-ignored).
-            save_page_snapshot(
-                page, self.settings.debug_dir, f"empresas_{datetime.now():%Y%m%d-%H%M%S}"
-            )
-            cells = row.locator("td")
-            self.selected_company_name = cells.first.inner_text().strip() if cells.count() else None
-            row.locator(selectors.COMPANY_ROW_SELECT).last.click()
-            page.wait_for_url(
-                lambda url: selectors.COMPANY_SELECTION_URL_PART not in url.lower(),
-                timeout=self.settings.navigation_timeout_ms,
-                wait_until="domcontentloaded",
-            )
+                return
         except PlaywrightError as exc:
+            if self._left_company_selection(condominium):
+                return
             raise self._navigation_error("empresa", str(exc).splitlines()[0]) from exc
-        logger.info(
-            "Empresa selecionada: %s (%s)", self.selected_company_name, condominium.cnpj_formatted
+        raise self._navigation_error(
+            "empresa",
+            f"{condominium.cnpj_formatted} não aparece na lista de empresas do certificado "
+            "(a procuração inclui este condomínio?)",
         )
+
+    def _left_company_selection(self, condominium: Condominium) -> bool:
+        # A click may already have selected the company (e.g. the grid filtered itself while
+        # typing): the page left "Empresas". The header check confirms which one.
+        if self.on_company_selection():
+            return False
+        logger.info(
+            "Saiu da tela Empresas (%s); conferindo o cabeçalho.", condominium.cnpj_formatted
+        )
+        return True
 
     def _input_after_label(self, label: str) -> Locator:
         # PROVISÓRIO: by the visible label until the recon gives the real id.
@@ -395,21 +403,19 @@ class IssnetSession:
             f"xpath=//*[normalize-space(text())='{label}']/following::input[1]"
         )
 
-    def _company_search_button(self) -> Locator:
-        # PROVISÓRIO: tooltip "Localizar" (title, or data-original-title once Bootstrap
-        # initializes the tooltip), else the first button after the "Ano" field.
+    def _search_companies(self, field: Locator) -> None:
+        # PROVISÓRIO: the search button shows the tooltip "Localizar" (title, or
+        # data-original-title once Bootstrap initializes it). Without a visible one, press
+        # Enter in the field. Never guess another button: it could be the ✓ of another
+        # company in the grid.
         title = selectors.COMPANY_SEARCH_TITLE
-        by_title = self.page.locator(f"[title='{title}'], [data-original-title='{title}']")
-        if by_title.count() >= 1:
-            return by_title.first
-        clickable = (
-            "self::button or self::a or "
-            "self::input[@type='submit' or @type='image' or @type='button']"
+        button = self.page.locator(
+            f"[title='{title}']:visible, [data-original-title='{title}']:visible"
         )
-        return self.page.locator(
-            f"xpath=//*[normalize-space(text())='{selectors.COMPANY_SEARCH_AFTER_LABEL}']"
-            f"/following::*[{clickable}][1]"
-        )
+        if button.count() >= 1:
+            button.first.click()
+        else:
+            field.press("Enter")
 
     def _navigation_error(self, step: str, message: str) -> NavigationError:
         saved = save_page_snapshot(
@@ -450,12 +456,17 @@ class IssnetSession:
         text, source = self.identity_text()
         compact = re.sub(r"[.\-/\s]", "", text).upper()
         header = self.header_company_name()
-        selected = self.selected_company_name
+        if self.selected_company_name:
+            # The grid row picked by CNPJ is the reference.
+            matches = bool(header) and _plain(header) == _plain(self.selected_company_name)
+        else:
+            # No row captured: compare with the spreadsheet name (accents/case ignored).
+            matches = bool(header) and _plain(header) == _plain(condominium.name)
         return IdentityCheck(
             cnpj_found=condominium.cnpj in compact,
             name_found=_plain(condominium.name) in _plain(text),
             source="cabeçalho" if header else source,
-            selected_company_match=bool(header and selected and _plain(header) == _plain(selected)),
+            selected_company_match=matches,
             header_name=header,
         )
 

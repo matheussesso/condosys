@@ -45,8 +45,9 @@ CONTENT_FRAME_NAME = "iframe"  # <iframe id="iframe" name="iframe" src="Default.
 HEADER_COMPANY_NAME = "#lblNomeEmpresa"  # selected taxpayer name (no CNPJ in the header)
 HEADER_MUNICIPAL_REGISTRATION = "#lblCae"
 HEADER_USER_NAME = "#lblNomeUsuario"  # certificate holder (e.g. Sema Contabilidade)
-# "Alterar Empresa": back to the Empresas screen without a new login.
-CHANGE_COMPANY_BUTTON = "a[href*=\"__doPostBack('btnEmpresas'\"]"
+# "Alterar Empresa": back to the Empresas screen without a new login. Hidden inside the
+# collapsed navbar (☰) — trigger with __doPostBack('btnEmpresas','') or open the navbar.
+CHANGE_COMPANY_BUTTON = "#btnEmpresas"
 LOGOUT_BUTTON = "#btnSair"
 
 # Kept for compatibility: the header shows the name, not the CNPJ.
@@ -60,11 +61,12 @@ HEADER_COMPETENCE: str | None = None
 # captured yet. The locators are built from these texts in session.py; replace them with
 # real ids once the recon captures this screen.
 
-COMPANY_SELECTION_URL_PART = "empresas.aspx"  # confirmed (URL after the proxy login)
+# Confirmed: /online/default/empresas.aspx after login, /online/Default/Empresas.aspx from
+# "Alterar Empresa" (compare in lower case).
+COMPANY_SELECTION_URL_PART = "empresas.aspx"
 COMPANY_FILTER_CNPJ_LABEL = "CPF / CNPJ"
-# The search button shows the tooltip "Localizar"; it is the first button after "Ano".
+# The search button shows the tooltip "Localizar" (else: Enter in the CNPJ field).
 COMPANY_SEARCH_TITLE = "Localizar"
-COMPANY_SEARCH_AFTER_LABEL = "Ano"
 # Last clickable element of the grid row ("Selecione" column, green ✓).
 COMPANY_ROW_SELECT = "a, button, input[type=submit], input[type=image], input[type=button]"
 
@@ -81,25 +83,36 @@ TAKEN_INVOICES_PATH = "/online/NotaDigital/ConsultaNotaTomador.aspx"
 # PROVISÓRIO: text expected on the "Consulta Notas Tomadas" screen (rotina-fiscal.pdf, 4.6).
 TAKEN_INVOICES_PAGE_TEXT = "Notas Tomadas"
 
-# --- Consulta Notas Tomadas: filters -----------------------------------------------------
+# --- Consulta Notas Tomadas: filters ----------------------------------------------------
+# Confirmed on 23/10/2026 from the real HTML of /online/NotaDigital/ConsultaNotaTomador.aspx
+# (inside the content iframe). ASP.NET postbacks: links call __doPostBack.
 
-# TODO: capturar via recon — "Série" select and the option value for NFS-e.
-FILTER_SERIES: str | None = None
-FILTER_SERIES_NFSE_LABEL = "Nota Fiscal de Serviço Eletrônica - NFS-e"  # PROVISÓRIO
+FILTER_SERIES = "#ddlSerie"
+FILTER_SERIES_NFSE_VALUE = "1"  # "Nota Fiscal de Serviço Eletrônica - NFS-e"
+# Other options: "2" NFSA-e avulsa, "20" "NFS-e - Modelo Nacional" (DF national standard is
+# mandatory from 01/10/2026 — the query may need this series for 10/2026 on), "24" restaurada.
+FILTER_SERIES_NATIONAL_VALUE = "20"
+FILTER_SERIES_NFSE_LABEL = "Nota Fiscal de Serviço Eletrônica - NFS-e"
+FILTER_NUMBER_START = "#txtNumIni"
+FILTER_NUMBER_END = "#txtNumFinal"
 
-# TODO: capturar via recon — "Filtros Adicionais" expander (the ▽ button).
-FILTER_ADDITIONAL_TOGGLE: str | None = None
+# "Filtros Adicionais" ▽: postback that shows #trDadosDocumento / #trStatusNota.
+FILTER_ADDITIONAL_TOGGLE = "#imbArrow"
+FILTER_ADDITIONAL_PANEL = "#trDadosDocumento"
 
-# TODO: capturar via recon — date inputs (check the expected format, probably dd/mm/aaaa).
-FILTER_ISSUE_DATE_START: str | None = None
-FILTER_ISSUE_DATE_END: str | None = None
+# dd/mm/aaaa, maxlength 10, formatted by FormataData on keypress (type it, do not paste).
+FILTER_ISSUE_DATE_START = "#txtDtEmissaoIni"
+FILTER_ISSUE_DATE_END = "#txtDtEmissaoFim"
+FILTER_PROVIDER_DOCUMENT = "#txtCpfCnpjPrestador"
 
-# TODO: capturar via recon — "Status NFS-e" select ("Normal" / "Cancelado").
-FILTER_STATUS: str | None = None
-FILTER_STATUS_NORMAL_LABEL = "Normal"  # PROVISÓRIO
+# Changing the status triggers a postback (onchange __doPostBack('ddlStatusNfse')).
+FILTER_STATUS = "#ddlStatusNfse"
+FILTER_STATUS_NORMAL_VALUE = "1"  # "2" = Cancelado
+FILTER_STATUS_NORMAL_LABEL = "Normal"
+FILTER_NATURE = "#ddlNatOperacao"
 
-# TODO: capturar via recon — "Localizar" button.
-FILTER_SEARCH_BUTTON: str | None = None
+FILTER_SEARCH_BUTTON = "#btnBuscarNotas"  # "Localizar"
+PRINT_BUTTON = "#btnImprimir"
 
 # --- Consulta Notas Tomadas: "Documentos Fiscais" grid -----------------------------------
 

@@ -62,10 +62,17 @@ seletor no cabeçalho); a competência provavelmente já é definida aqui.
 
 Automação atual (PROVISÓRIA, `session.select_company`): campo após o texto "CPF / CNPJ"
 (`get_by_label` ou `following::input[1]`), CNPJ só com dígitos e, se não achar, formatado;
-botão com `title`/`data-original-title` = "Localizar" (ou o primeiro botão após "Ano");
-linha `tr` **mais interna** que contém o CNPJ formatado (a grade fica dentro de tabelas de
-layout) → último link/botão da linha (✓). A grade filtrada é salva em
-`debug/empresas_*.html` a cada execução; em falha, a tela vai para `debug/falha-empresa_*`.
+botão **visível** com `title`/`data-original-title` = "Localizar", senão Enter no campo
+(nunca outro botão: poderia ser o ✓ de outra empresa); última `tr` do documento que contém
+o CNPJ formatado (a grade fica dentro de tabelas de layout) → último link/botão da linha
+(✓). Se algum clique já tirou a página da tela Empresas, segue e confere o cabeçalho.
+Salva `debug/empresas-inicio_*` ao chegar e `debug/empresas-filtrada_*` antes do ✓.
+
+Teste real de 23/10/2026: o CNPJ foi digitado e o Vivendas 107 foi selecionado, mas a
+versão anterior não percebeu a mudança de tela e acusou falha (corrigido). O HTML da tela
+Empresas ainda não foi salvo — virá no próximo `login-test` (`empresas-inicio_*`).
+Também confirmado: "Alterar Empresa" = `#btnEmpresas` (escondido no menu ☰ do topo) e o
+endereço `Default/Empresas.aspx` (maiúsculas variam).
 
 ## 2. Casca do portal — `Default/Master.aspx`
 
@@ -104,16 +111,25 @@ menu), sem depender de expandir a árvore.
 
 ## 4. Consulta Notas Tomadas — filtros
 
-| elemento | seletor | status |
-|---|---|---|
-| Série (opção "Nota Fiscal de Serviço Eletrônica - NFS-e") | | ❌ |
-| N.º Inicial / N.º Final | | ❌ |
-| "Filtros Adicionais" (▽) | | ❌ |
-| Data Emissão Inicial / Final (formato?) | | ❌ |
-| CPF/CNPJ do Prestador | | ❌ |
-| Status NFS-e ("Normal"/"Cancelado") | | ❌ |
-| Natureza de Operação | | ❌ |
-| botão "Localizar" | | ❌ |
+Confirmado em 23/10/2026: HTML real de `/online/NotaDigital/ConsultaNotaTomador.aspx`
+lido no iframe `iframe` (`debug/leitura/20261023-004947_p0_f1.html`).
+
+| elemento | seletor | observação | status |
+|---|---|---|---|
+| Série | `#ddlSerie` | valores: `0` Selecione, `1` NFS-e, `2` NFSA-e avulsa, `20` **NFS-e - Modelo Nacional**, `24` NFS-e restaurada | ✅ |
+| N.º Inicial / Final | `#txtNumIni`, `#txtNumFinal` | só números | ✅ |
+| "Filtros Adicionais" (▽) | `#imbArrow` | postback `__doPostBack('imbArrow','')`; mostra `#trDadosDocumento` e `#trStatusNota` | ✅ |
+| Data Emissão Inicial / Final | `#txtDtEmissaoIni`, `#txtDtEmissaoFim` | `dd/mm/aaaa`, maxlength 10, `FormataData` no keypress, colar bloqueado (`onpaste`) → digitar | ✅ |
+| CPF/CNPJ do Prestador | `#txtCpfCnpjPrestador` | máscara no keyup | ✅ |
+| Status NFS-e | `#ddlStatusNfse` | `1` Normal, `2` Cancelado; **mudar dispara postback** | ✅ |
+| Natureza de Operação | `#ddlNatOperacao` | `1`–`6` como na rotina | ✅ |
+| Localizar | `#btnBuscarNotas` | `__doPostBack('btnBuscarNotas','')` | ✅ |
+| Imprimir | `#btnImprimir` | | ✅ |
+| Ajuda | `#btnAjuda` | | ✅ |
+
+Atenção (Fase 2): desde 01/10/2026 a NFS-e do DF é no padrão nacional; para competências
+a partir de 10/2026 provavelmente será preciso consultar também a série `20` (Modelo
+Nacional). Confirmar no recon.
 
 ## 5. Grade "Documentos Fiscais"
 
