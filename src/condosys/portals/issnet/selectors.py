@@ -26,6 +26,10 @@ LOGIN_CERTIFICATE_BUTTON = "#btnAcionaCertificado"
 LOGIN_CERTIFICATE_BUTTON_TEXT = "Logar com certificado digital"
 # Global JS function defined by ihubauth.js; missing when the portal scripts were blocked.
 LOGIN_AUTH_FUNCTION = "ihubauth"
+# Confirmed on 2026-10-23 (real login): the iHub popup may show a Cloudflare Turnstile
+# checkbox ("Confirme que é humano"), served in an iframe from this host. A person must
+# tick it; the login waits for them (settings.human_check_timeout_ms).
+HUMAN_CHECK_FRAME_URL = "challenges.cloudflare.com"
 
 # TODO: capturar via recon — URL (or URL fragment) that only exists after a successful login.
 LOGGED_IN_URL_PATTERN: str | None = None

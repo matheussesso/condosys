@@ -24,6 +24,7 @@ from playwright.sync_api import Error as PlaywrightError
 from condosys.browser import BrowserSetupError, build_client_certificates, new_certificate_context
 from condosys.credentials import save_password
 from condosys.models import AccessMode, Condominium
+from condosys.portals.issnet import selectors
 from condosys.portals.issnet.session import IssnetSession, LoginError
 from condosys.recon import PageRecorder
 from condosys.settings import Settings
@@ -82,12 +83,25 @@ window.close();
 </script></body></html>"""
 
 
+IHUB_CHALLENGE_PAGE = """<html><body><iframe src="/turnstile"></iframe><script>
+setTimeout(function () {{
+  window.opener.postMessage({{ok: true, ticket: {ticket}}}, '*');
+  window.close();
+}}, 2500);
+</script></body></html>"""
+
+
 class _EchoClientHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         peer = self.connection.getpeercert()  # type: ignore[attr-defined]
         subject = dict(item[0] for item in peer["subject"]) if peer else {}
         common_name = subject.get("commonName", "")
-        if self.path.startswith("/auth"):
+        if self.path.startswith("/auth?token=DESAFIO"):
+            # Human check: an iframe from the "challenge" host, solved after a while.
+            body = IHUB_CHALLENGE_PAGE.format(ticket=json.dumps(common_name))
+        elif self.path.startswith("/turnstile"):
+            body = "<html><body><label><input type=checkbox> Confirme que é humano</label>"
+        elif self.path.startswith("/auth"):
             body = IHUB_AUTH_PAGE.format(ticket=json.dumps(common_name))
         else:
             body = f"<html><body><p id='cn'>{common_name}</p></body></html>"
@@ -184,7 +198,7 @@ Logar com certificado digital</a>
 <script>
 {ihub_script}
 function btnAssinar_onClick() {{
-  ihubauth('LICENCA', function (erro, ticket) {{
+  ihubauth(location.search.includes('desafio') ? 'DESAFIO' : 'LICENCA', function (erro, ticket) {{
     if (erro) {{ alert(erro.mensagem); return; }}
     location.href = '/online/Default.aspx?ticket=' + encodeURIComponent(ticket);
   }});
@@ -421,5 +435,34 @@ def test_issnet_login_explains_wrong_certificate_origin(
         session = IssnetSession(context.new_page(), settings)
         with pytest.raises(LoginError, match=f"o popup de autenticação abriu em {ihub}"):
             session.login()
+    finally:
+        context.close()
+
+
+def test_issnet_login_waits_for_human_check(
+    browser: Browser,
+    fake_portal: tuple[str, str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    portal, ihub, legacy = fake_portal
+    monkeypatch.setattr(selectors, "HUMAN_CHECK_FRAME_URL", f"{ihub}/turnstile")
+    settings = _portal_settings(tmp_path, portal, ihub, legacy).model_copy(
+        update={
+            "issnet_login_url": f"{portal}/online/Login/Login.aspx?desafio=1",
+            # Shorter than the fake challenge (2.5 s): only the extension lets it pass.
+            "navigation_timeout_ms": 1_000,
+            "human_check_timeout_ms": 10_000,
+        }
+    )
+    context = new_certificate_context(browser, settings, "the-sun.pfx", ignore_https_errors=True)
+    try:
+        session = IssnetSession(context.new_page(), settings)
+        with caplog.at_level("WARNING", logger="condosys"):
+            session.login()
+        assert session.human_check_shown
+        assert "Confirme que é humano" in caplog.text
+        assert session.check_identity(THE_SUN).confirmed
     finally:
         context.close()

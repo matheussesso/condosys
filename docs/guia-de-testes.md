@@ -273,8 +273,14 @@ O que acontece:
 
 1. Abre o navegador (janela visível) na página de login do ISSNet.
 2. Clica em "Logar com certificado digital".
-3. Abre o popup do iHub e fecha sozinho, **sem pedir para escolher certificado**.
-4. Entra no portal, procura o CNPJ do condomínio na página e tira um screenshot.
+3. Abre o popup do iHub ("IHub — Autenticação com Certificado Digital"), **sem pedir
+   para escolher certificado**. "Não seguro" na barra de endereço é esperado: o
+   Playwright intermedeia a conexão para entregar o certificado.
+4. Se aparecer a caixa **"Confirme que é humano"** (Cloudflare), **marque-a**. O terminal
+   avisa e o condosys espera até 3 minutos (`CONDOSYS_HUMAN_CHECK_TIMEOUT_MS`). O sistema
+   não tenta pular essa verificação.
+5. O popup fecha sozinho, a página entra no portal, o condosys procura o CNPJ do
+   condomínio e tira um screenshot.
 
 Resultado no terminal:
 
@@ -395,6 +401,7 @@ Pasta `debug/recon/<AAAAMMDD-HHMMSS>/`:
 | `alerta do portal: Token de licença inválido ou saldo zerado.` | iHub código 403 — licença do portal | problema do portal/licença, não do condosys; tente mais tarde |
 | `alerta do portal: Muitas requisições...` | iHub código 429 | aguarde alguns minutos |
 | `alerta do portal: Licença inválida ou JWT de sessão expirado` / `Domínio não autorizado` | iHub códigos 401/402 | recarregue e tente de novo; se repetir, registre em `docs/decisoes.md` |
+| `o login não foi concluído no tempo limite (a verificação 'Confirme que é humano' do iHub não foi concluída)` | ninguém marcou a caixa do Cloudflare no popup a tempo | rode de novo e marque a caixa; se precisar, aumente `CONDOSYS_HUMAN_CHECK_TIMEOUT_MS` |
 | `o login não foi concluído no tempo limite` | portal lento ou mudou | aumente `CONDOSYS_NAVIGATION_TIMEOUT_MS`; rode o recon para ver a tela |
 | `o certificado não foi enviado para <origem>` | o portal passou a pedir certificado em outro endereço | inclua a origem em `CONDOSYS_ISSNET_CERT_ORIGINS` no `.env` |
 | login-test termina com código 2 | entrou, mas o CNPJ não aparece no texto da página | confira o screenshot; capture o cabeçalho no recon |
@@ -450,6 +457,8 @@ CONDOSYS_NAVIGATION_TIMEOUT_MS=90000 # portal lento
 - **Saldo do iHub:** cada login consome saldo da licença do portal. Evite rodar
   `login-test` em loop.
 - **Respeito ao portal:** um condomínio por vez; não rode vários comandos em paralelo.
+- **Verificação humana:** quando o iHub pedir "Confirme que é humano", uma pessoa marca a
+  caixa. Não use extensões ou truques para pular o Cloudflare.
 - **Validade:** o certificado da Sema vence em **05/11/2026**. Confira sempre com
   `cert list` antes de uma rodada de testes.
 

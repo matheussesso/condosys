@@ -84,6 +84,7 @@ class IssnetSession:
         self.settings = settings
         self.popups: list[Page] = []
         self.popup_origins: list[str] = []
+        self.human_check_shown = False
         self.dialog_messages: list[str] = []
         self._failed_documents: list[tuple[str, str]] = []
         # Context-level, so popup requests are seen from the very first one.
@@ -142,19 +143,40 @@ class IssnetSession:
             self._wait_for_login()
             self.page.wait_for_load_state("load")
         except PlaywrightTimeoutError as exc:
-            raise self._login_error("o login não foi concluído no tempo limite", exc) from exc
+            message = "o login não foi concluído no tempo limite"
+            if self.human_check_shown:
+                message += " (a verificação 'Confirme que é humano' do iHub não foi concluída)"
+            raise self._login_error(message, exc) from exc
         except PlaywrightError as exc:
             raise self._login_error("o portal recusou a conexão com certificado", exc) from exc
         self._raise_on_certificate_error_page(self.page)
         logger.info("Login concluído: %s", _without_query(self.page.url))
 
     def _wait_for_login(self) -> None:
-        """Waits for the redirect into the portal, failing fast on popup/alert errors."""
+        """Waits for the redirect into the portal, failing fast on popup/alert errors.
+
+        While the iHub popup shows the "Confirme que é humano" check, a person must tick it:
+        the user is told so and the deadline is extended by ``human_check_timeout_ms``.
+        """
         deadline = time.monotonic() + self.settings.navigation_timeout_ms / 1000
+        human_check_seen = False
         while not self._is_logged_in_url(self.page.url):
             for popup in self.popups:
-                if not popup.is_closed():
-                    self._raise_on_certificate_error_page(popup)
+                if popup.is_closed():
+                    continue
+                self._raise_on_certificate_error_page(popup)
+                if not human_check_seen and self._has_human_check(popup):
+                    human_check_seen = True
+                    self.human_check_shown = True
+                    deadline = max(
+                        deadline,
+                        time.monotonic() + self.settings.human_check_timeout_ms / 1000,
+                    )
+                    logger.warning(
+                        "Verificação humana na janela do iHub: marque 'Confirme que é humano' "
+                        "(aguardando até %d s).",
+                        self.settings.human_check_timeout_ms // 1000,
+                    )
             if self.dialog_messages:
                 raise self._login_error(
                     "o portal recusou o login", PlaywrightError(self.dialog_messages[-1])
@@ -162,6 +184,13 @@ class IssnetSession:
             if time.monotonic() > deadline:
                 raise PlaywrightTimeoutError("tempo esgotado aguardando a entrada no portal")
             self.page.wait_for_timeout(250)
+
+    @staticmethod
+    def _has_human_check(popup: Page) -> bool:
+        try:
+            return any(selectors.HUMAN_CHECK_FRAME_URL in frame.url for frame in popup.frames)
+        except PlaywrightError:
+            return False
 
     def _ensure_login_scripts(self) -> None:
         function = selectors.LOGIN_AUTH_FUNCTION

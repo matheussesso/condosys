@@ -126,6 +126,8 @@ certificado** e cada condomínio usa uma sessão nova, sem precisar fechar o nav
 
 - A janela do navegador precisa ficar **visível**: no modo invisível o Cloudflare bloqueia
   os scripts de login do portal.
+- Se a janela do iHub mostrar **"Confirme que é humano"**, marque a caixa: o condosys avisa
+  no terminal e espera (até 3 minutos).
 - Cada login consome saldo da licença do portal no iHub; evite repetir o `login-test` à toa.
 - Procuração: até o seletor de contribuinte ser mapeado pelo recon, o `login-test` pede
   para você escolher o condomínio na janela e apertar Enter no terminal.

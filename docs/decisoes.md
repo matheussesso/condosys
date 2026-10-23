@@ -103,6 +103,18 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
 - **Custo:** o comentário do `ihubauth.js` diz que cada autenticação "debita saldo" da
   licença do portal no iHub. Evitar logins desnecessários; na coleta em lote (Fase 4),
   agrupar condomínios por certificado e trocar de contribuinte na mesma sessão.
+- **Verificação humana (confirmado em 23/10/2026, primeiro login real com o certificado
+  da Sema):** com a origem certa, o certificado chega ao iHub e o popup carrega
+  "IHub — Autenticação com Certificado Digital", mas pode exibir o Cloudflare Turnstile
+  ("Confirme que é humano"); a própria página avisa "Se aparecer uma caixa de verificação
+  abaixo, marque-a". **Decisão:** não contornar a proteção. O login fica semiautomático:
+  o condosys detecta o iframe `challenges.cloudflare.com` no popup, avisa no terminal e
+  estende a espera por `CONDOSYS_HUMAN_CHECK_TIMEOUT_MS` (padrão 180 s) para a pessoa
+  marcar a caixa. Consequência para a Fase 4/8: a coleta em lote não roda sem ninguém na
+  frente do computador; agrupar por certificado reduz o número de verificações.
+- **Erro do primeiro teste real:** `.env` gerado antes desta descoberta mandava o
+  certificado para `https://iss.fazenda.df.gov.br` → iHub 457 ("Certificado digital
+  inválido ou não apresentado"). A mensagem de erro agora aponta a origem certa.
 - **Pendente (teste manual com certificado real):** confirmar o handshake com um A1 real,
   a URL após o login e o seletor de contribuinte (procuração).
 

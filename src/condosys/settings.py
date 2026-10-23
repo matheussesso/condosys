@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     navigation_timeout_ms: int = Field(default=60_000, ge=1_000)
     # Short pause between browser actions, to be gentle with the portal.
     slow_mo_ms: int = Field(default=300, ge=0)
+    # Extra wait while a person solves the "Confirme que é humano" check in the iHub popup.
+    human_check_timeout_ms: int = Field(default=180_000, ge=1_000)
     # Pause between two condominiums in batch runs.
     between_condominiums_ms: int = Field(default=3_000, ge=0)
 
