@@ -75,11 +75,18 @@ class IdentityCheck:
     cnpj_found: bool
     name_found: bool
     source: str
+    # The header name equals the name of the grid row picked by CNPJ on "Empresas".
+    selected_company_match: bool = False
+    header_name: str = ""
 
     @property
     def confirmed(self) -> bool:
-        """The CNPJ is the reliable proof; the name alone is only a hint."""
-        return self.cnpj_found
+        """CNPJ on the page, or the header shows the company picked by CNPJ.
+
+        The portal header shows only the name; the condominium name in the spreadsheet
+        alone is a hint (it may be written differently).
+        """
+        return self.cnpj_found or self.selected_company_match
 
 
 def _plain(text: str) -> str:
@@ -109,6 +116,8 @@ class IssnetSession:
         self.popups: list[Page] = []
         self.popup_origins: list[str] = []
         self.human_check_shown = False
+        # Name in the "Empresas" grid row picked by CNPJ (proxy access).
+        self.selected_company_name: str | None = None
         self.dialog_messages: list[str] = []
         self._failed_documents: list[tuple[str, str]] = []
         # Context-level, so popup requests are seen from the very first one.
@@ -335,8 +344,14 @@ class IssnetSession:
             for value in (condominium.cnpj, condominium.cnpj_formatted):
                 field.fill(value)
                 self._company_search_button().click()
-                page.wait_for_load_state("load")
-                candidate = page.locator("tr").filter(has_text=condominium.cnpj_formatted)
+                page.wait_for_load_state("domcontentloaded")
+                # Innermost row only: the grid sits inside layout tables whose rows also
+                # "contain" the CNPJ text.
+                candidate = (
+                    page.locator("tr")
+                    .filter(has_text=condominium.cnpj_formatted)
+                    .filter(has_not=page.locator("tr"))
+                )
                 try:
                     candidate.first.wait_for(timeout=self.settings.timeout_ms // 3)
                 except PlaywrightTimeoutError:
@@ -353,15 +368,23 @@ class IssnetSession:
                 raise self._navigation_error(
                     "empresa", f"{row.count()} linhas com o CNPJ {condominium.cnpj_formatted}"
                 )
+            # Kept for debugging the provisional locators (debug/ is git-ignored).
+            save_page_snapshot(
+                page, self.settings.debug_dir, f"empresas_{datetime.now():%Y%m%d-%H%M%S}"
+            )
+            cells = row.locator("td")
+            self.selected_company_name = cells.first.inner_text().strip() if cells.count() else None
             row.locator(selectors.COMPANY_ROW_SELECT).last.click()
             page.wait_for_url(
                 lambda url: selectors.COMPANY_SELECTION_URL_PART not in url.lower(),
                 timeout=self.settings.navigation_timeout_ms,
+                wait_until="domcontentloaded",
             )
-            page.wait_for_load_state("load")
         except PlaywrightError as exc:
             raise self._navigation_error("empresa", str(exc).splitlines()[0]) from exc
-        logger.info("Empresa selecionada: %s (%s)", condominium.name, condominium.cnpj_formatted)
+        logger.info(
+            "Empresa selecionada: %s (%s)", self.selected_company_name, condominium.cnpj_formatted
+        )
 
     def _input_after_label(self, label: str) -> Locator:
         # PROVISÓRIO: by the visible label until the recon gives the real id.
@@ -397,12 +420,19 @@ class IssnetSession:
 
     # --- checks ------------------------------------------------------------------------
 
+    def header_company_name(self) -> str:
+        """Name of the selected taxpayer in the portal header (empty if not shown)."""
+        try:
+            return (
+                self.page.locator(selectors.HEADER_COMPANY_NAME)
+                .first.inner_text(timeout=3_000)
+                .strip()
+            )
+        except PlaywrightError:
+            return ""
+
     def identity_text(self) -> tuple[str, str]:
-        """Returns (text, source) used to identify the current taxpayer."""
-        if selectors.HEADER_TAXPAYER is not None:
-            locator = self.page.locator(selectors.HEADER_TAXPAYER).first
-            return locator.inner_text(), "cabeçalho"
-        # TODO: capturar via recon — until then, search the text of every frame.
+        """Returns (text, source): the text of every frame, header included."""
         texts = []
         for frame in self.page.frames:
             try:
@@ -412,13 +442,21 @@ class IssnetSession:
         return "\n".join(texts), "texto da página"
 
     def check_identity(self, condominium: Condominium) -> IdentityCheck:
-        """Checks that the page shows the condominium CNPJ (and name)."""
+        """Checks that the portal is in the condominium environment.
+
+        Proof: its CNPJ on the page, or the header name equal to the "Empresas" grid row
+        that was picked by CNPJ.
+        """
         text, source = self.identity_text()
         compact = re.sub(r"[.\-/\s]", "", text).upper()
+        header = self.header_company_name()
+        selected = self.selected_company_name
         return IdentityCheck(
             cnpj_found=condominium.cnpj in compact,
             name_found=_plain(condominium.name) in _plain(text),
-            source=source,
+            source="cabeçalho" if header else source,
+            selected_company_match=bool(header and selected and _plain(header) == _plain(selected)),
+            header_name=header,
         )
 
     # --- utilities ---------------------------------------------------------------------
@@ -430,14 +468,14 @@ class IssnetSession:
         return path
 
     def logout(self) -> None:
-        """Logs out, when the logout selector is known (closing the context also ends it)."""
-        if selectors.LOGOUT_BUTTON is None:
-            # TODO: capturar via recon. Closing the context discards the session anyway.
-            return
+        """Clicks "Sair" when it is on the page (closing the browser also ends the session)."""
         try:
-            self.page.locator(selectors.LOGOUT_BUTTON).first.click()
+            button = self.page.locator(selectors.LOGOUT_BUTTON)
+            if button.count():
+                button.first.click(timeout=5_000)
+                logger.info("Saiu do portal.")
         except PlaywrightError:
-            logger.warning("Não foi possível sair do portal; o contexto será fechado.")
+            logger.warning("Não foi possível sair do portal; o navegador será fechado.")
 
 
 @contextmanager

@@ -37,9 +37,19 @@ LOGGED_IN_URL_PATTERN: str | None = None
 # TODO: capturar via recon — message element shown when the login fails.
 LOGIN_ERROR_MESSAGE: str | None = None
 
-# --- Header (after login) ----------------------------------------------------------------
+# --- Shell after the company is chosen (Default/Master.aspx) ----------------------------
+# Confirmed on 23/10/2026 from the real HTML (debug/falha-empresa_20261023-004227.html).
+# Master.aspx is a shell: header + Telerik menu; every screen opens inside the iframe below.
 
-# TODO: capturar via recon — element with the current taxpayer name / CNPJ.
+CONTENT_FRAME_NAME = "iframe"  # <iframe id="iframe" name="iframe" src="Default.aspx">
+HEADER_COMPANY_NAME = "#lblNomeEmpresa"  # selected taxpayer name (no CNPJ in the header)
+HEADER_MUNICIPAL_REGISTRATION = "#lblCae"
+HEADER_USER_NAME = "#lblNomeUsuario"  # certificate holder (e.g. Sema Contabilidade)
+# "Alterar Empresa": back to the Empresas screen without a new login.
+CHANGE_COMPANY_BUTTON = "a[href*=\"__doPostBack('btnEmpresas'\"]"
+LOGOUT_BUTTON = "#btnSair"
+
+# Kept for compatibility: the header shows the name, not the CNPJ.
 HEADER_TAXPAYER: str | None = None
 
 # TODO: capturar via recon — element with the current competence.
@@ -58,21 +68,18 @@ COMPANY_SEARCH_AFTER_LABEL = "Ano"
 # Last clickable element of the grid row ("Selecione" column, green ✓).
 COMPANY_ROW_SELECT = "a, button, input[type=submit], input[type=image], input[type=button]"
 
-# TODO: capturar via recon — logout link/button.
-LOGOUT_BUTTON: str | None = None
 
 # --- Menu -> Declaração de Serviços Contratados -> Consulta de Notas Tomadas -------------
+# Confirmed (real HTML): Telerik tree, <a class="rtIn" target="iframe"
+# href="../NotaDigital/ConsultaNotaTomador.aspx">Consulta de Notas Tomadas</a>. condosys
+# loads that address in the content iframe, exactly as the menu link does.
 
-# PROVISÓRIO: visible menu texts (rotina-fiscal.pdf, 4.6, and the menu screenshot of
-# 23/10/2026: "≡ Menu" button, "Buscar no Menu IssNet" search, expandable items).
 MENU_TEXT = "Menu"
 MENU_CONTRACTED_SERVICES_TEXT = "Declaração de Serviços Contratados"
 MENU_TAKEN_INVOICES_TEXT = "Consulta de Notas Tomadas"
-# Text expected on the "Consulta Notas Tomadas" screen (rotina-fiscal.pdf, 4.6).
+TAKEN_INVOICES_PATH = "/online/NotaDigital/ConsultaNotaTomador.aspx"
+# PROVISÓRIO: text expected on the "Consulta Notas Tomadas" screen (rotina-fiscal.pdf, 4.6).
 TAKEN_INVOICES_PAGE_TEXT = "Notas Tomadas"
-
-# TODO: capturar via recon — direct URL of "Consulta Notas Tomadas", if stable.
-TAKEN_INVOICES_URL: str | None = None
 
 # --- Consulta Notas Tomadas: filters -----------------------------------------------------
 

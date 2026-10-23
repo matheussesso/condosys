@@ -315,11 +315,12 @@ O que acontece:
    e assume o navegador. Espera até 5 minutos (`CONDOSYS_ASSISTED_LOGIN_TIMEOUT_MS`).
 5. Procuração: o condosys **digita o CNPJ do condomínio** no filtro da tela Empresas,
    clica na lupa (Localizar) e no ✓ verde da linha. Não mexa no navegador nessa hora.
-6. Confere o CNPJ do condomínio na página e abre **Menu → Declaração de Serviços
-   Contratados → Consulta de Notas Tomadas**.
-7. Tira o screenshot e fecha o navegador.
+6. Confere o ambiente: o cabeçalho do portal (`#lblNomeEmpresa`) tem de mostrar a empresa
+   escolhida pelo CNPJ. Depois abre **Consulta de Notas Tomadas** no quadro de conteúdo
+   do portal (mesmo endereço do link do menu).
+7. Tira o screenshot, clica em **Sair** e fecha o navegador.
 
-Os passos 5 e 6 usam seletores **provisórios** (montados a partir dos textos visíveis nos
+O passo 5 usa seletores **provisórios** (montados a partir dos textos visíveis nos
 prints, ainda sem o HTML real). Se algum falhar, o condosys salva a tela em
 `debug/falha-empresa_<data-hora>.html/.png` ou `debug/falha-menu_<data-hora>.html/.png`,
 pede para você fazer aquele passo à mão e apertar **Enter**, e segue. Traga esses arquivos
@@ -331,7 +332,8 @@ Resultado no terminal:
 |---|---|
 | Página / URL | onde o navegador parou (a URL é mostrada sem parâmetros) |
 | CNPJ na página | `sim` = entrou no ambiente do condomínio certo |
-| Nome na página | indicação extra; pode ser `não` se o portal abrevia o nome |
+| Empresa no cabeçalho | nome em `#lblNomeEmpresa` e se confere com a linha escolhida pelo CNPJ |
+| Nome na página | indicação extra (nome da planilha); pode ser `não` se estiver escrito diferente |
 | Consulta de Notas Tomadas | `aberta` = chegou à tela de consulta |
 | Screenshot | `debug/login-test_<condominio>_<data-hora>.png` (tela final) |
 

@@ -63,28 +63,44 @@ seletor no cabeçalho); a competência provavelmente já é definida aqui.
 Automação atual (PROVISÓRIA, `session.select_company`): campo após o texto "CPF / CNPJ"
 (`get_by_label` ou `following::input[1]`), CNPJ só com dígitos e, se não achar, formatado;
 botão com `title`/`data-original-title` = "Localizar" (ou o primeiro botão após "Ano");
-linha `tr` que contém o CNPJ formatado → último link/botão da linha (✓). Em falha, a tela
-vai para `debug/falha-empresa_*`.
+linha `tr` **mais interna** que contém o CNPJ formatado (a grade fica dentro de tabelas de
+layout) → último link/botão da linha (✓). A grade filtrada é salva em
+`debug/empresas_*.html` a cada execução; em falha, a tela vai para `debug/falha-empresa_*`.
 
-## 2. Cabeçalho (após login)
+## 2. Casca do portal — `Default/Master.aspx`
+
+Confirmado em 23/10/2026 no HTML real (`debug/falha-empresa_20261023-004227.html`).
+Depois de escolher a empresa, o portal abre `online/Default/Master.aspx`: cabeçalho +
+menu lateral; **todas as telas abrem dentro de um iframe**.
 
 | elemento | seletor | status |
 |---|---|---|
-| nome/CNPJ do contribuinte atual | | ❌ |
+| iframe do conteúdo | `<iframe id="iframe" name="iframe" src="Default.aspx">` | ✅ |
+| nome do contribuinte selecionado | `#lblNomeEmpresa` (só o nome, **sem CNPJ**) | ✅ |
+| inscrição municipal | `#lblCae` | ✅ |
+| usuário do certificado | `#lblNomeUsuario` (ex.: "Sema Contabilidade e...") | ✅ |
+| data/hora de acesso | `#lblDataAcesso` | ✅ |
+| "Alterar Empresa" (volta à tela Empresas, sem novo login) | `a[href*="__doPostBack('btnEmpresas'"]` | ✅ |
+| sair | `#btnSair` (`__doPostBack('btnSair','')`) | ✅ |
 | competência atual | | ❌ |
-| seletor de contribuinte (procuração) | | ❌ |
-| sair / logout | | ❌ |
+
+Conferência do ambiente: como o cabeçalho não mostra o CNPJ, o condosys compara o nome do
+cabeçalho com o nome da linha escolhida pelo CNPJ na tela Empresas.
 
 ## 3. Menu → Declaração de Serviços Contratados → Consulta de Notas Tomadas
 
-| elemento | seletor | status |
+Menu em árvore Telerik (`li.rtLI`, texto em `.rtIn`); busca em `#txtBuscaMenu`
+("Buscar no Menu IssNet"). Os links abrem no iframe (`target="iframe"`) e chamam
+`mostrarModalLoad()`.
+
+| elemento | seletor / endereço | status |
 |---|---|---|
-| "≡ Menu" | botão/link com nome "Menu" (só clicado se o menu estiver fechado) | 🟡 |
-| busca do menu | campo "Buscar no Menu IssNet" | 🟡 print |
-| "Declaração de Serviços Contratados" | `get_by_text(..., exact=True)` (expande o submenu) | 🟡 print |
-| "Consulta de Notas Tomadas" | `get_by_text(..., exact=True)` | 🟡 print |
-| tela aberta | texto "Notas Tomadas" na página | 🟡 |
-| URL direta da tela (se estável) | | ❌ |
+| "Consulta de Notas Tomadas" | `a.rtIn[href="../NotaDigital/ConsultaNotaTomador.aspx"][target="iframe"]` | ✅ |
+| endereço da tela | `/online/NotaDigital/ConsultaNotaTomador.aspx`, carregado no iframe `iframe` | ✅ |
+| "Declaração de Serviços Contratados" → Incluir / Consultar | `../Servicos_Contratados/...` | ✅ (não usado) |
+
+O condosys abre a consulta carregando esse endereço no iframe (mesmo efeito do link do
+menu), sem depender de expandir a árvore.
 
 ## 4. Consulta Notas Tomadas — filtros
 

@@ -1,15 +1,16 @@
 """Page Object for "Consulta de Notas Tomadas". Navigates and returns raw HTML only.
 
-``open`` works with provisional locators (visible menu texts); the query itself is
-implemented in phase 2, once ``selectors.py`` is filled from the recon material.
+``open`` loads the screen in the shell content iframe (address confirmed from the real
+menu); the query itself is implemented in phase 2, once the recon captures the screen.
 """
 
 import logging
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urljoin
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Locator, Page
+from playwright.sync_api import Frame, Page
 
 from condosys.models import Competence
 from condosys.portals.issnet import selectors
@@ -24,38 +25,29 @@ class TakenInvoicesPage:
     def __init__(self, page: Page, debug_dir: Path | None = None) -> None:
         self.page = page
         self.debug_dir = debug_dir
+        # Where the screen lives: the shell content iframe, or the page itself.
+        self.frame: Frame = page.main_frame
 
     def open(self) -> None:
-        """Navigates to the query screen through the portal menu.
+        """Opens the query screen in the content iframe, as the menu link does.
 
         Raises:
-            NavigationError: If a menu item is not found (the screen is saved to debug/).
+            NavigationError: If the screen does not open (it is saved to debug/).
         """
         page = self.page
+        url = urljoin(page.url, selectors.TAKEN_INVOICES_PATH)
         try:
-            if selectors.TAKEN_INVOICES_URL is not None:
-                page.goto(selectors.TAKEN_INVOICES_URL)
+            frame = page.frame(name=selectors.CONTENT_FRAME_NAME)
+            if frame is not None:
+                frame.goto(url, wait_until="domcontentloaded")
+                self.frame = frame
             else:
-                # PROVISÓRIO: visible menu texts until the recon gives the real ids.
-                if not self._menu_item(selectors.MENU_CONTRACTED_SERVICES_TEXT).is_visible():
-                    self._clickable(selectors.MENU_TEXT).click()
-                self._menu_item(selectors.MENU_CONTRACTED_SERVICES_TEXT).click()
-                self._menu_item(selectors.MENU_TAKEN_INVOICES_TEXT).click()
-            page.wait_for_load_state("load")
-            page.get_by_text(selectors.TAKEN_INVOICES_PAGE_TEXT).first.wait_for()
+                page.goto(url, wait_until="domcontentloaded")
+                self.frame = page.main_frame
+            self.frame.get_by_text(selectors.TAKEN_INVOICES_PAGE_TEXT).first.wait_for()
         except PlaywrightError as exc:
             raise self._error(str(exc).splitlines()[0]) from exc
-        logger.info("Tela Consulta de Notas Tomadas aberta: %s", page.url.split("?")[0])
-
-    def _clickable(self, text: str) -> Locator:
-        return (
-            self.page.get_by_role("button", name=text, exact=True)
-            .or_(self.page.get_by_role("link", name=text, exact=True))
-            .first
-        )
-
-    def _menu_item(self, text: str) -> Locator:
-        return self.page.get_by_text(text, exact=True).first
+        logger.info("Tela Consulta de Notas Tomadas aberta: %s", url)
 
     def _error(self, message: str) -> NavigationError:
         where = ""

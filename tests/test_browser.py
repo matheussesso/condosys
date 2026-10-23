@@ -224,6 +224,7 @@ FAKE_COMPANIES = {
     "11222333000181": "CONDOMINIO DO BLOCO B DA SQS 302",
 }
 FAKE_EMPRESAS = """<html><head><title>Empresas</title></head><body>
+<table class="layout"><tr><td>
 <h3>Empresas</h3><form method="get" action="/online/default/empresas.aspx">
 <div><label>Inscrição Municipal</label><input name="im"></div>
 <div><label>CPF / CNPJ</label><input name="doc"></div>
@@ -233,18 +234,15 @@ FAKE_EMPRESAS = """<html><head><title>Empresas</title></head><body>
    onclick="this.closest('form').submit(); return false;"><i>&#128269;</i></a>
 </form><p>Selecione a Empresa</p><table>
 <tr><th>Nome / Razão Social</th><th>CPF/CNPJ</th><th>Selecione</th></tr>{rows}</table>
-<a href="#">1</a> <a href="#">2</a></body></html>"""
-FAKE_PRINCIPAL = """<html><head><title>ISSNet On-Line</title></head><body>
-<a href="#" id="btnMenu"
-   onclick="document.getElementById('menu').style.display='block'; return false;">
-   <i class="fa fa-bars"></i> Menu</a>
-<div>Contribuinte: {name} - {cnpj}</div>
-<div id="menu" style="display:none"><input placeholder="Buscar no Menu IssNet">
-<a href="#" onclick="document.getElementById('sub').style.display='block'; return false;">
-   Declaração de Serviços Contratados</a>
-<div id="sub" style="display:none"><a href="#">Incluir</a>
-<a href="/online/NotaFiscal/ConsultaTomadas.aspx">Consulta de Notas Tomadas</a></div>
-<a href="#">Guias de Recolhimento</a></div></body></html>"""
+<a href="#">1</a> <a href="#">2</a></td></tr></table></body></html>"""
+# Shell like the real Default/Master.aspx: header with the company name only, "Sair",
+# and every screen inside <iframe name="iframe">.
+FAKE_MASTER = """<html><head><title>ISSNet On-Line - Nota Eletrônica</title></head><body>
+<a href="javascript:__doPostBack('btnEmpresas','')" data-original-title="Alterar Empresa">
+<span id="lblNomeEmpresa">{name}</span></a>
+<span id="lblNomeUsuario">Sema Contabilidade e...</span>
+<a id="btnSair" href="/online/Login/Login.aspx">Sair</a>
+<iframe id="iframe" name="iframe" src="Default.aspx"></iframe></body></html>"""
 
 
 def _company_rows(query: str) -> str:
@@ -256,7 +254,7 @@ def _company_rows(query: str) -> str:
         formatted = f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
         rows.append(
             f"<tr><td>{name}</td><td>{formatted}</td><td>"
-            f"<a href='/online/default/principal.aspx?cnpj={cnpj}'>&#10003;</a></td></tr>"
+            f"<a href='/online/Default/Master.aspx?cnpj={cnpj}'>&#10003;</a></td></tr>"
         )
     return "".join(rows)
 
@@ -277,10 +275,12 @@ def _make_portal_handler(ihub_origin: str) -> type[http.server.BaseHTTPRequestHa
             elif path == "/online/default/empresas.aspx":
                 doc = urllib.parse.parse_qs(query).get("doc", [""])[0]
                 body = FAKE_EMPRESAS.format(rows=_company_rows(doc))
-            elif path == "/online/default/principal.aspx":
+            elif path == "/online/Default/Master.aspx":
                 cnpj = urllib.parse.parse_qs(query).get("cnpj", [""])[0]
-                body = FAKE_PRINCIPAL.format(name=FAKE_COMPANIES.get(cnpj, "?"), cnpj=cnpj)
-            elif path == "/online/NotaFiscal/ConsultaTomadas.aspx":
+                body = FAKE_MASTER.format(name=FAKE_COMPANIES.get(cnpj, "?"))
+            elif path == "/online/Default/Default.aspx":
+                body = "<html><body><p>Mensagens</p></body></html>"
+            elif path == "/online/NotaDigital/ConsultaNotaTomador.aspx":
                 body = (
                     "<html><head><title>Consulta Notas Tomadas</title></head><body>"
                     "<h3>Consulta Notas Tomadas</h3><p>Dados da Consulta</p></body></html>"
@@ -560,6 +560,8 @@ def test_select_company_and_open_taken_invoices(
     browser: Browser, plain_portal: str, tmp_path: Path
 ) -> None:
     settings = _plain_settings(tmp_path, plain_portal)
+    # The spreadsheet name differs from the portal name: identity comes from the CNPJ pick.
+    condominium = THE_SUN.model_copy(update={"name": "The Sun (planilha)"})
     context = browser.new_context()
     try:
         page = context.new_page()
@@ -567,12 +569,25 @@ def test_select_company_and_open_taken_invoices(
         session = IssnetSession(page, settings)
         assert session.on_company_selection()
 
-        session.select_company(THE_SUN)
+        session.select_company(condominium)
 
-        assert "principal.aspx" in page.url
-        assert session.check_identity(THE_SUN).confirmed
-        TakenInvoicesPage(page, settings.debug_dir).open()
-        assert page.url.endswith("/online/NotaFiscal/ConsultaTomadas.aspx")
+        assert "/online/Default/Master.aspx" in page.url
+        assert session.selected_company_name == FAKE_COMPANIES[THE_SUN_CNPJ]
+        check = session.check_identity(condominium)
+        assert not check.cnpj_found  # the header has no CNPJ, like the real portal
+        assert check.selected_company_match
+        assert check.confirmed
+        assert check.header_name == FAKE_COMPANIES[THE_SUN_CNPJ]
+        assert list(settings.debug_dir.glob("empresas_*.html"))
+
+        invoices = TakenInvoicesPage(page, settings.debug_dir)
+        invoices.open()
+        assert invoices.frame.name == "iframe"
+        assert invoices.frame.url.endswith("/online/NotaDigital/ConsultaNotaTomador.aspx")
+        assert "/online/Default/Master.aspx" in page.url  # shell kept, like the menu link
+
+        session.logout()
+        page.wait_for_url("**/Login/Login.aspx")
     finally:
         context.close()
 
@@ -594,13 +609,16 @@ def test_select_company_not_in_list_saves_screen(
         context.close()
 
 
-def test_menu_failure_saves_screen(browser: Browser, plain_portal: str, tmp_path: Path) -> None:
+def test_taken_invoices_failure_saves_screen(
+    browser: Browser, plain_portal: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(selectors, "TAKEN_INVOICES_PATH", "/online/NotaDigital/Outra.aspx")
     settings = _plain_settings(tmp_path, plain_portal)
     context = browser.new_context()
     context.set_default_timeout(1_000)
     try:
         page = context.new_page()
-        page.goto(f"{plain_portal}/online/NotaFiscal/Inexistente.aspx")
+        page.goto(f"{plain_portal}/online/Default/Master.aspx?cnpj={THE_SUN_CNPJ}")
         with pytest.raises(NavigationError, match="Consulta de Notas Tomadas"):
             TakenInvoicesPage(page, settings.debug_dir).open()
         assert list(settings.debug_dir.glob("falha-menu_*.html"))

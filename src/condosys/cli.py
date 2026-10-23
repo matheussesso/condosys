@@ -440,7 +440,8 @@ def _open_taken_invoices(settings: Settings, session: IssnetSession, interactive
         "Consulta de Notas Tomadas."
     )
     console.input("Depois de abrir, pressione [bold]Enter[/] aqui... ")
-    return selectors.TAKEN_INVOICES_PAGE_TEXT in session.page.content()
+    text, _ = session.identity_text()  # text of every frame (the screen opens in an iframe)
+    return selectors.TAKEN_INVOICES_PAGE_TEXT in text
 
 
 @app.command("login-test")
@@ -483,6 +484,9 @@ def login_test(
         f"CNPJ na página ({check.source})",
         "[green]sim[/]" if check.cnpj_found else "[red]não[/]",
     )
+    if check.header_name:
+        match = "[green]confere[/]" if check.selected_company_match else "[yellow]?[/]"
+        table.add_row("Empresa no cabeçalho", f"{check.header_name} ({match})")
     table.add_row("Nome na página", "[green]sim[/]" if check.name_found else "[yellow]não[/]")
     table.add_row(
         "Consulta de Notas Tomadas", "[green]aberta[/]" if invoices_open else "[red]não abriu[/]"
