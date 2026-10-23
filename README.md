@@ -38,6 +38,8 @@ uv run playwright install-deps chromium   # usa sudo/apt
 No **Windows**, em vez do Chromium baixado, dá para usar o Microsoft Edge já instalado:
 coloque `CONDOSYS_BROWSER_CHANNEL=msedge` no `.env`.
 
+Rode os comandos sempre de dentro da pasta do projeto (o `.env` é lido da pasta atual).
+
 ### 3. Inicialização
 
 ```bash
@@ -108,8 +110,51 @@ modo invisível, tempos de espera e pausas entre ações. **Nunca** coloque senh
 | `condosys cert list` | lista certificados, validade e situação da senha |
 | `condosys cert remove <nome>` | remove a senha do cofre |
 | `condosys config check` | valida `condominios.xlsx` e cruza com os certificados |
+| `condosys login-test <condomínio>` | faz login no ISSNet, confere o CNPJ na página e salva screenshot em `debug/` |
+| `condosys recon <condomínio>` | login + Playwright Inspector; salva HTML/screenshot de cada tela em `debug/recon/` |
 
 Todos os comandos aceitam `--help`. Use `uv run condosys -v <comando>` para log detalhado.
+
+`<condomínio>` aceita o nome (ou parte dele, sem acento/maiúscula) ou o CNPJ.
+
+## Login no ISSNet
+
+O botão "Logar com certificado digital" do ISSNet abre uma janela do **iHub**
+(`api.ihub.com.br`), que pede o certificado. O condosys entrega o `.pfx` do condomínio
+(ou da i9/Sema, na procuração) direto ao navegador: **não aparece janela de escolha de
+certificado** e cada condomínio usa uma sessão nova, sem precisar fechar o navegador.
+
+- A janela do navegador precisa ficar **visível**: no modo invisível o Cloudflare bloqueia
+  os scripts de login do portal.
+- Cada login consome saldo da licença do portal no iHub; evite repetir o `login-test` à toa.
+- Procuração: até o seletor de contribuinte ser mapeado pelo recon, o `login-test` pede
+  para você escolher o condomínio na janela e apertar Enter no terminal.
+
+```bash
+uv run condosys login-test "the sun"
+```
+
+Resultado: tabela com a página aberta, se o CNPJ/nome do condomínio aparece e o caminho
+do screenshot. Código de saída 0 = confirmado, 1 = erro, 2 = entrou mas não achou o CNPJ.
+
+### Recon (mapear as telas)
+
+```bash
+uv run condosys recon "the sun"
+```
+
+1. O navegador faz o login e abre o **Playwright Inspector**.
+2. Navegue: Menu → Declaração de Serviços Contratados → Consulta de Notas Tomadas;
+   preencha os filtros (NFS-e, datas da competência, Status Normal), clique em Localizar,
+   abra uma nota (Visualizar), teste o ícone ao lado (XML?), vá para a página 2 da grade.
+3. Cada página carregada é salva sozinha. Depois de **Localizar** e de qualquer mudança
+   sem recarregar a página, clique no botão **Capturar** (canto inferior direito).
+4. No Inspector, **Pick locator** mostra o seletor de qualquer elemento.
+5. Clique em **Resume** (▶) para seguir sem o Inspector; feche as abas para terminar.
+
+Tudo fica em `debug/recon/<data-hora>/`: `NNN_*.html`, `NNN_*.png`, `index.jsonl`,
+`requests.log` e `downloads/`. `--trace` grava também um `trace.zip` (abrir com
+`uv run playwright show-trace debug/recon/<data-hora>/trace.zip`; contém cookies).
 
 ## Segurança e dados sensíveis
 
@@ -123,7 +168,8 @@ Todos os comandos aceitam `--help`. Use `uv run condosys -v <comando>` para log 
 ## Desenvolvimento
 
 ```bash
-uv run pytest              # testes
+uv run pytest              # testes (os de navegador usam servidores locais)
+uv run pytest -m "not browser"   # sem Chromium
 uv run ruff check .        # lint
 uv run ruff format .       # formatação
 uv run mypy                # tipos (strict)

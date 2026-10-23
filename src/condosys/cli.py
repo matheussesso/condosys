@@ -1,16 +1,22 @@
 """Command line interface (Typer)."""
 
+import contextlib
 import logging
+import re
 import shutil
-from datetime import date
+import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from playwright.sync_api import BrowserContext
+from playwright.sync_api import Error as PlaywrightError
 from rich.console import Console
 from rich.table import Table
 
 from condosys import __version__
+from condosys.browser import BrowserSetupError
 from condosys.certificates import CertificateError, list_certificate_files, read_certificate_info
 from condosys.config_loader import (
     CondominiumNotFoundError,
@@ -23,6 +29,14 @@ from condosys.credentials import CredentialStoreError, delete_password, get_pass
 from condosys.documents import format_cnpj
 from condosys.logging_setup import setup_logging
 from condosys.models import AccessMode, CertificateInfo, Condominium
+from condosys.portals.issnet.session import (
+    IssnetSession,
+    LoginError,
+    ManualStepRequired,
+    issnet_session,
+    needs_taxpayer_selection,
+)
+from condosys.recon import PageRecorder, new_recon_dir
 from condosys.settings import Settings, get_settings
 
 logger = logging.getLogger("condosys.cli")
@@ -321,3 +335,175 @@ def resolve_condominium(settings: Settings, query: str) -> Condominium:
         return find_condominium(condominiums, query)
     except CondominiumNotFoundError as exc:
         raise _fail(str(exc)) from exc
+
+
+# --- login-test / recon ------------------------------------------------------------------
+
+
+def _file_slug(text: str) -> str:
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^0-9A-Za-z]+", "-", plain).strip("-").lower()[:40] or "condominio"
+
+
+def _describe(condominium: Condominium) -> None:
+    console.print(
+        f"Condomínio: [bold]{condominium.name}[/] ({condominium.cnpj_formatted}) — "
+        f"acesso {condominium.access_mode.value} com certs/{condominium.certificate}"
+    )
+
+
+def _select_taxpayer(session: IssnetSession, condominium: Condominium, interactive: bool) -> None:
+    if not needs_taxpayer_selection(condominium):
+        return
+    try:
+        session.select_taxpayer(condominium)
+    except ManualStepRequired as exc:
+        if not interactive:
+            raise _fail(f"passo manual necessário ({exc}); rode sem --headless.") from exc
+        console.print(
+            f"\n[bold yellow]Passo manual:[/] na janela do navegador, {exc}.\n"
+            "(O seletor ainda não foi capturado; o recon vai permitir automatizar isso.)"
+        )
+        console.input("Depois de selecionar, pressione [bold]Enter[/] aqui... ")
+
+
+@app.command("login-test")
+def login_test(
+    condominio: Annotated[str, typer.Argument(help="Nome (ou parte do nome) ou CNPJ.")],
+    headless: Annotated[
+        bool, typer.Option("--headless", help="Não mostra a janela do navegador.")
+    ] = False,
+) -> None:
+    """Faz login no ISSNet com o certificado do condomínio e confere o ambiente."""
+    settings = get_settings()
+    condominium = resolve_condominium(settings, condominio)
+    _describe(condominium)
+    stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    base_name = f"login-test_{_file_slug(condominium.name)}_{stamp}"
+
+    try:
+        with issnet_session(settings, condominium, headless=headless) as session:
+            try:
+                session.login()
+            except LoginError:
+                shot = session.screenshot(settings.debug_dir / f"{base_name}_erro.png")
+                console.print(f"Screenshot do erro: {shot}")
+                raise
+            _select_taxpayer(session, condominium, interactive=not headless)
+            check = session.check_identity(condominium)
+            shot = session.screenshot(settings.debug_dir / f"{base_name}.png")
+            title = session.page.title()
+            url = session.page.url
+    except (BrowserSetupError, LoginError, CredentialStoreError) as exc:
+        raise _fail(str(exc)) from exc
+    except PlaywrightError as exc:
+        raise _fail(f"erro no navegador: {exc}") from exc
+
+    table = Table(show_header=False, box=None)
+    table.add_row("Página", title)
+    table.add_row("URL", url.split("?")[0])
+    table.add_row(
+        f"CNPJ na página ({check.source})",
+        "[green]sim[/]" if check.cnpj_found else "[red]não[/]",
+    )
+    table.add_row("Nome na página", "[green]sim[/]" if check.name_found else "[yellow]não[/]")
+    table.add_row("Screenshot", str(shot))
+    console.print(table)
+    if not check.confirmed:
+        console.print(
+            "[bold yellow]Login feito, mas o CNPJ do condomínio não apareceu na página.[/] "
+            "Confira o screenshot; rode o recon para mapear o cabeçalho."
+        )
+        raise typer.Exit(2)
+    console.print("[bold green]Login confirmado no ambiente do condomínio.[/]")
+
+
+def _wait_until_closed(context: BrowserContext, recorder: PageRecorder) -> None:
+    """Keeps the recorder running until every tab is closed."""
+    while True:
+        pages = [page for page in context.pages if not page.is_closed()]
+        if not pages:
+            return
+        with contextlib.suppress(PlaywrightError):
+            pages[-1].wait_for_timeout(500)
+        recorder.flush()
+
+
+@app.command()
+def recon(
+    condominio: Annotated[str, typer.Argument(help="Nome (ou parte do nome) ou CNPJ.")],
+    trace: Annotated[
+        bool,
+        typer.Option(
+            "--trace",
+            help="Grava também um trace do Playwright (trace.zip). Contém cookies da sessão.",
+        ),
+    ] = False,
+) -> None:
+    """Faz login e abre o Playwright Inspector, salvando HTML + screenshot de cada tela."""
+    settings = get_settings()
+    condominium = resolve_condominium(settings, condominio)
+    _describe(condominium)
+    out_dir = new_recon_dir(settings.debug_dir)
+    recorder = PageRecorder(out_dir)
+    contexts: list[BrowserContext] = []
+
+    def on_context(context: BrowserContext) -> None:
+        contexts.append(context)
+        recorder.attach(context)
+        if trace:
+            context.tracing.start(screenshots=True, snapshots=True)
+
+    login_failed = False
+    try:
+        with issnet_session(
+            settings, condominium, headless=False, on_context=on_context
+        ) as session:
+            try:
+                session.login()
+            except LoginError as exc:
+                login_failed = True
+                console.print(f"[bold red]Login falhou:[/] {exc}")
+                console.print("O Inspector vai abrir mesmo assim para investigar a tela.")
+            if not login_failed and needs_taxpayer_selection(condominium):
+                console.print(
+                    f"[bold yellow]Procuração:[/] selecione {condominium.name} "
+                    f"({condominium.cnpj_formatted}) no cabeçalho do portal."
+                )
+            console.print(
+                "\n[bold]Recon em andamento[/]\n"
+                f"  - Tudo é salvo em {out_dir}\n"
+                "  - Cada página carregada é capturada automaticamente.\n"
+                "  - Use o botão [bold]Capturar[/] (canto inferior direito) após filtros e\n"
+                "    atualizações parciais (ex.: depois de clicar em Localizar).\n"
+                "  - No Inspector, 'Pick locator' mostra o seletor de um elemento.\n"
+                "  - Clique em 'Resume' (▶) no Inspector para continuar navegando sem ele;\n"
+                "    feche todas as abas do navegador para terminar."
+            )
+            session.page.pause()
+            recorder.flush()
+            console.print("Inspector retomado. Feche as abas do navegador para terminar.")
+            _wait_until_closed(session.page.context, recorder)
+            if trace:
+                try:
+                    session.page.context.tracing.stop(path=out_dir / "trace.zip")
+                    console.print(
+                        f"Trace salvo: {out_dir / 'trace.zip'} "
+                        "(abra com: uv run playwright show-trace <arquivo>)"
+                    )
+                except PlaywrightError as exc:
+                    console.print(f"[yellow]Não foi possível salvar o trace:[/] {exc}")
+    except (BrowserSetupError, CredentialStoreError) as exc:
+        raise _fail(str(exc)) from exc
+    except PlaywrightError as exc:
+        # Closing the browser window while paused ends the session abruptly.
+        logger.debug("Sessão do navegador encerrada: %s", exc)
+        recorder.flush()
+
+    console.print(f"\n[bold]{recorder.count} capturas[/] em {out_dir}")
+    console.print(
+        "Próximo passo: preencha docs/issnet-mapa.md e "
+        "src/condosys/portals/issnet/selectors.py a partir desse material."
+    )
+    if login_failed:
+        raise typer.Exit(1)

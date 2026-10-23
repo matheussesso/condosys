@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from condosys.cli import app
@@ -83,3 +84,16 @@ def test_config_check_invalid_sheet(settings: Settings) -> None:
     result = runner.invoke(app, ["config", "check"])
     assert result.exit_code == 1
     assert "Planilha inválida" in result.output
+
+
+@pytest.mark.browser
+def test_login_test_without_password_explains(settings: Settings) -> None:
+    create_example_workbook(settings.config_file)
+    settings.certs_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("the-sun.pfx", "i9-brasil.pfx", "sema.pfx"):
+        (settings.certs_dir / name).write_bytes(b"")
+    result = runner.invoke(app, ["login-test", "the sun", "--headless"], env={"COLUMNS": "200"})
+    if "não foi possível abrir o navegador" in result.output:
+        pytest.skip("Chromium indisponível")
+    assert result.exit_code == 1, result.output
+    assert "senha do certificado the-sun.pfx não cadastrada" in result.output

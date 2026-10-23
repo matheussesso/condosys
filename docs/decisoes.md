@@ -26,9 +26,13 @@ Formato simples de ADR: contexto, decisão, consequências. Mais recentes no fim
 - **Por que recodificar:** muitos A1 de ACs brasileiras vêm cifrados com RC2/3DES; o
   OpenSSL 3 usado pelo navegador/driver costuma recusar esses PKCS#12 ("unsupported").
   Recodificar evita isso sem gravar nada em disco.
-- **Origens:** `CONDOSYS_ISSNET_CERT_ORIGINS` (padrão `https://iss.fazenda.df.gov.br`). Se
-  o recon mostrar que "Logar com certificado digital" vai para outro host/porta, basta
-  incluir a origem nessa lista.
+- **Origens:** `CONDOSYS_ISSNET_CERT_ORIGINS`. Padrão `https://api.ihub.com.br` — ver
+  ADR-007: quem pede o certificado é o popup do iHub, não o ISSNet.
+- **Testado localmente** (`tests/test_browser.py`): servidor HTTPS que exige certificado
+  cliente (CA de teste) aceita o `.pfx` moderno e o legado 3DES, com e sem recodificação;
+  sem certificado o navegador recebe `ERR_`. Quando o handshake falha, o Playwright **não
+  lança exceção**: serve uma página HTTP 503 com o texto `Playwright client-certificate
+  error: ...` — o login verifica esse texto (na página e no popup).
 
 ### Plano B (se o `client_certificates` falhar no ISSNet)
 
@@ -71,3 +75,45 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
   descritos na rotina (marcados `PROVISÓRIO`). O restante é `None` com
   `TODO: capturar via recon`. Consulta, parsing e exportação ficam como esqueletos
   (`NotImplementedError`) até termos o HTML real.
+
+## ADR-007 — O login do ISSNet DF passa por um popup do iHub (Fase 1)
+
+- **Contexto (verificado em 22/10/2026 na página pública de login, sem certificado):**
+  - O botão "Logar com certificado digital" é `<a id="btnAcionaCertificado"
+    onclick="btnAssinar_onClick()">`.
+  - `btnAssinar_onClick()` chama `ihubauth(<valor de #licencaCertificado>, callback)`
+    (script `ihubauth.js` v2, servido por `www.notacontrol.com.br`). Ele abre um popup em
+    `https://api.ihub.com.br/auth?token=<licença>`; esse servidor (NGINX com
+    `ssl_verify_client optional`) pede o certificado ICP-Brasil **no handshake TLS
+    inicial** e devolve um ticket por `postMessage`. A página grava o ticket em
+    `#ticketcertificado` e faz `__doPostBack('btnToken')`.
+  - `openssl s_client -connect api.ihub.com.br:443` lista 180 ACs ICP-Brasil aceitas,
+    incluindo **AC SEMPRE RFB v2** (emissora do certificado do The Sun).
+  - Erros do iHub chegam como `alert()` na página de login (códigos 401/402/403/429/456/457;
+    457 = "Certificado digital inválido ou não apresentado").
+  - A página também carrega `lacuna-web-pki-2.5.0.js`, mas o fluxo atual do botão não o usa.
+- **Decisão:** manter o Plano A (`client_certificates`), apontando a origem para
+  `https://api.ihub.com.br`. O login clica no botão, acompanha o popup e espera a
+  entrada no portal, falhando rápido se o popup mostrar erro de TLS ou se surgir um alerta.
+- **Restrição — Cloudflare:** os scripts de `www.notacontrol.com.br` (inclusive
+  `ihubauth.js`) são bloqueados para o navegador em **modo invisível** (headless):
+  `net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin` (desafio do Cloudflare). Com a janela
+  visível eles carregam normalmente. Por isso `CONDOSYS_HEADLESS=false` é obrigatório; o
+  login detecta a ausência de `window.ihubauth` e explica o problema.
+- **Custo:** o comentário do `ihubauth.js` diz que cada autenticação "debita saldo" da
+  licença do portal no iHub. Evitar logins desnecessários; na coleta em lote (Fase 4),
+  agrupar condomínios por certificado e trocar de contribuinte na mesma sessão.
+- **Pendente (teste manual com certificado real):** confirmar o handshake com um A1 real,
+  a URL após o login e o seletor de contribuinte (procuração).
+
+## ADR-008 — Gravação do recon
+
+- **Decisão:** `PageRecorder` salva HTML (página + frames) e screenshot a cada evento
+  `load`, registra as requisições (sem cabeçalhos, cookies ou corpos) e salva downloads.
+  Um botão "Capturar" é injetado (shadow DOM, removido do HTML salvo) para telas que mudam
+  por postback parcial do ASP.NET, que não dispara `load`.
+- **Achado:** na API síncrona do Playwright, chamar a API (ex.: `page.content()`) dentro do
+  callback de `expose_binding` **trava**; dentro de handlers de `load` funciona. Por isso
+  o botão envia o próprio HTML pelo binding e o screenshot é tirado depois (`flush()`).
+- **Trace opcional** (`--trace`): `trace.zip` do Playwright tem DOM e rede de cada ação,
+  mas inclui cookies — fica em `debug/` (fora do git) e só é gerado quando pedido.

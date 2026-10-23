@@ -11,7 +11,8 @@ Rotina original: `docs/rotina-fiscal.pdf`. Fases: `ROADMAP.md`.
 uv sync                                   # dependências
 uv run playwright install chromium        # navegador
 uv run condosys --help                    # CLI
-uv run pytest                             # testes
+uv run pytest                             # testes (inclui os de navegador, marcador "browser")
+uv run pytest -m "not browser"            # sem Chromium
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                               # strict no pacote
 ```
@@ -22,6 +23,8 @@ Antes de concluir qualquer mudança: `ruff check`, `ruff format`, `mypy` e `pyte
 
 - `cli.py` (Typer) → `services/` (orquestração) → `portals/issnet/` (Page Objects) + `parsers.py` (puro) → `exporters/`.
 - `browser.py`: um `BrowserContext` novo **por certificado**, com `client_certificates` do Playwright.
+- Login do ISSNet: popup `https://api.ihub.com.br/auth` pede o certificado no TLS (ADR-007). Exige janela visível (Cloudflare bloqueia headless). Cada login debita saldo no iHub: evitar logins repetidos.
+- `recon.py`: gravador de páginas para o recon (`debug/recon/<timestamp>/`).
 - `certificates.py` (cryptography) lê `.pfx`; `credentials.py` (keyring) guarda senhas; `config_loader.py` lê `config/condominios.xlsx`.
 - `settings.py` (pydantic-settings, prefixo `CONDOSYS_`, `.env`); `models.py` (Pydantic v2).
 - Detalhes em `docs/arquitetura.md`; decisões em `docs/decisoes.md`.

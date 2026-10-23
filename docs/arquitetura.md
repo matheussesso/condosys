@@ -55,9 +55,12 @@ condosys (CLI Typer)
 2. `credentials` lê a senha do keyring; `certificates` abre o `.pfx` e (por padrão)
    recodifica o PKCS#12 em memória com AES-256.
 3. `browser` cria o contexto com
-   `client_certificates=[{"origin": ..., "pfx": <bytes>, "passphrase": ...}]`.
-4. `session` abre a página de login e clica em "Logar com certificado digital"; o
-   navegador apresenta o certificado no handshake TLS sem janela de seleção.
+   `client_certificates=[{"origin": "https://api.ihub.com.br", "pfx": <bytes>, "passphrase": <aleatória>}]`.
+4. `session` abre a página de login, confere se os scripts do portal carregaram e clica
+   em `#btnAcionaCertificado`. O portal abre um popup em `api.ihub.com.br/auth`, onde o
+   navegador apresenta o certificado no handshake TLS (sem janela de seleção); o popup
+   devolve um ticket e a página entra no portal. Erros de TLS no popup e `alert()` do
+   portal interrompem o login na hora (ADR-007).
 5. Procuração: seleção do contribuinte no cabeçalho (seletor a capturar no recon; até lá
    o usuário escolhe manualmente na janela e confirma no terminal).
 6. Conferência: o CNPJ/nome do condomínio deve aparecer na página (cabeçalho).
@@ -67,5 +70,6 @@ condosys (CLI Typer)
 - Caminhos com `pathlib`; nomes de arquivo sem `:`; arquivos de texto em UTF-8.
 - Keyring: Credential Manager (Windows) e Secret Service (Linux).
 - Navegador: Chromium do Playwright nos dois sistemas; opcionalmente o Edge instalado
-  (`CONDOSYS_BROWSER_CHANNEL=msedge`) no Windows.
+  (`CONDOSYS_BROWSER_CHANNEL=msedge`) no Windows. Sempre com janela visível (o Cloudflare
+  bloqueia o modo invisível).
 - Distribuição futura: executável PyInstaller (Fase 8).

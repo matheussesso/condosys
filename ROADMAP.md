@@ -16,13 +16,16 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [x] Esqueletos (`NotImplementedError`) de consulta, parsing, exportação e orquestração
 - [x] Documentação: README, CLAUDE.md, arquitetura, decisões, mapa do ISSNet
 
-## Fase 1 — Login e recon
+## Fase 1 — Login e recon ✅ (código) — aguardando teste no portal real
 
-- [ ] Fábrica de navegador com `client_certificates` (um contexto por certificado)
-- [ ] Login no ISSNet, seleção do contribuinte (procuração), conferência do ambiente
-- [ ] `condosys login-test <condomínio>` com screenshot em `debug/`
-- [ ] `condosys recon <condomínio>`: Playwright Inspector + captura automática de HTML/screenshot
-- [ ] **Teste manual no portal real** (pendente com o usuário)
+- [x] Fábrica de navegador com `client_certificates` (um contexto por certificado, `.pfx` recodificado em memória)
+- [x] Descoberta do fluxo real: popup `api.ihub.com.br` pede o certificado (ADR-007)
+- [x] Login no ISSNet (popup, alertas, erro TLS, scripts bloqueados) e conferência do CNPJ na página
+- [x] Seleção do contribuinte (procuração): passo manual guiado até o recon capturar o seletor
+- [x] `condosys login-test <condomínio>` com screenshot em `debug/`
+- [x] `condosys recon <condomínio>`: Playwright Inspector + captura automática (HTML, frames, screenshot, requisições, downloads, botão "Capturar", `--trace`)
+- [x] Testes com servidores locais (mTLS, popup iHub falso, gravador)
+- [ ] **Teste manual no portal real** com certificado DIRETO e com procuração
 - [ ] Preencher `selectors.py` e `docs/issnet-mapa.md` com o material do recon
 
 ## Fase 2 — Consulta de notas
@@ -46,6 +49,7 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 - [ ] Aba "Erros" (condomínios que falharam e o motivo)
 - [ ] Arquivo `output/notas_<competencia>_<data-hora>.xlsx`
 - [ ] `condosys collect --competencia 09/2026 [--condominio X]`
+- [ ] Agrupar condomínios por certificado: um login por certificado (cada login no iHub debita saldo — ADR-007)
 
 ## Fase 5 — Enriquecimento por CNPJ
 

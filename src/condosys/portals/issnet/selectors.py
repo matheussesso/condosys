@@ -16,9 +16,16 @@ How to capture a selector:
 """
 
 # --- Login (Login.aspx) ------------------------------------------------------------------
+# Confirmed on 2026-10-22 from the public login page (see docs/issnet-mapa.md, section 1).
+# Flow: the button calls btnAssinar_onClick() → ihubauth(<#licencaCertificado>) opens a
+# popup at https://api.ihub.com.br/auth, where the browser presents the certificate in the
+# TLS handshake; the popup posts a ticket back, which goes to #ticketcertificado and is
+# submitted with __doPostBack('btnToken').
 
-# PROVISÓRIO: visible text of the certificate login option (rotina-fiscal.pdf, 4.1).
+LOGIN_CERTIFICATE_BUTTON = "#btnAcionaCertificado"
 LOGIN_CERTIFICATE_BUTTON_TEXT = "Logar com certificado digital"
+# Global JS function defined by ihubauth.js; missing when the portal scripts were blocked.
+LOGIN_AUTH_FUNCTION = "ihubauth"
 
 # TODO: capturar via recon — URL (or URL fragment) that only exists after a successful login.
 LOGGED_IN_URL_PATTERN: str | None = None

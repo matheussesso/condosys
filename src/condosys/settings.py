@@ -46,8 +46,9 @@ class Settings(BaseSettings):
     issnet_login_url: str = (
         "https://iss.fazenda.df.gov.br/online/Login/Login.aspx?ReturnUrl=%2fonline"
     )
-    # Origins that receive the client certificate (scheme://host[:port], no path).
-    issnet_cert_origins: list[str] = ["https://iss.fazenda.df.gov.br"]
+    # Origins that receive the client certificate (scheme://host[:port], no path). The
+    # ISSNet login delegates the certificate check to the iHub popup (docs/decisoes.md).
+    issnet_cert_origins: list[str] = ["https://api.ihub.com.br"]
     # Re-encode the .pfx in memory with modern algorithms before handing it to the browser
     # (A1 certificates often use legacy RC2/3DES encryption that OpenSSL 3 rejects).
     reencode_pfx: bool = True

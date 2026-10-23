@@ -21,13 +21,21 @@ Legenda: ✅ confirmado no recon · 🟡 provisório (texto da rotina) · ❌ a 
 ## 1. Login — `Login/Login.aspx`
 
 URL: `https://iss.fazenda.df.gov.br/online/Login/Login.aspx?ReturnUrl=%2fonline`
+(verificado em 22/10/2026 na página pública, sem certificado — ver ADR-007).
 
 | elemento | seletor | status |
 |---|---|---|
-| botão "Logar com certificado digital" | `get_by_text("Logar com certificado digital")` | 🟡 |
-| destino do botão (host/porta/rota que pede o certificado) | | ❌ ver `requests.log` |
-| mensagem de erro de login | | ❌ |
+| botão "Logar com certificado digital" | `#btnAcionaCertificado` (`onclick="btnAssinar_onClick()"`) | ✅ |
+| licença do iHub (não logar) | `#licencaCertificado` (hidden) | ✅ |
+| ticket devolvido pelo popup | `#ticketcertificado` (hidden), enviado por `__doPostBack('btnToken')` | ✅ |
+| popup de autenticação | `https://api.ihub.com.br/auth?token=...` — pede o certificado no TLS | ✅ |
+| erros do iHub | `alert()` na página de login | ✅ |
+| login por usuário/senha (não usado) | `#txtLogin`, `#txtSenha`, `#btnAcessar` | ✅ |
 | URL/elemento que indica login concluído | | ❌ |
+| mensagem de erro do portal (fora do alert) | | ❌ |
+
+Observações: com o navegador invisível (headless) o Cloudflare bloqueia os scripts de
+`www.notacontrol.com.br` e o botão não funciona; use sempre a janela visível.
 
 ## 2. Cabeçalho (após login)
 

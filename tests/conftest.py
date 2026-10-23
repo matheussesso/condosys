@@ -67,8 +67,9 @@ def make_certificate(
     issuer_name: str = "AC TESTE RFB v5",
     not_before: dt.datetime | None = None,
     not_after: dt.datetime | None = None,
+    ca: tuple[rsa.RSAPrivateKey, x509.Certificate] | None = None,
 ) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
-    """Builds a self-signed certificate shaped like an ICP-Brasil e-CNPJ."""
+    """Builds a certificate shaped like an ICP-Brasil e-CNPJ (self-signed unless ``ca``)."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = dt.datetime.now(dt.UTC)
     builder = (
@@ -82,7 +83,11 @@ def make_certificate(
                 ]
             )
         )
-        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
+        .issuer_name(
+            ca[1].subject
+            if ca
+            else x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)])
+        )
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(not_before or now - dt.timedelta(days=1))
@@ -95,7 +100,25 @@ def make_certificate(
             ),
             critical=False,
         )
-    return key, builder.sign(key, hashes.SHA256())
+    return key, builder.sign(ca[0] if ca else key, hashes.SHA256())
+
+
+def make_ca(common_name: str = "AC TESTE RAIZ") -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = dt.datetime.now(dt.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return key, cert
 
 
 def write_pfx(
