@@ -50,4 +50,4 @@ Antes de concluir qualquer mudança: `ruff check`, `ruff format`, `mypy` e `pyte
 
 ## Ao concluir uma fase
 
-Sempre atualizar `ROADMAP.md` (checklist) e `docs/decisoes.md` (decisões e problemas encontrados), e fazer um commit por fase com mensagem clara em português.
+Sempre atualizar `ROADMAP.md` (checklist), `docs/guia-de-testes.md` (roteiro da fase) e `docs/decisoes.md` (decisões e problemas encontrados), e fazer um commit por fase com mensagem clara em português.

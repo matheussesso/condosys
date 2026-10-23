@@ -175,6 +175,8 @@ uv run ruff format .       # formatação
 uv run mypy                # tipos (strict)
 ```
 
+Guia completo de testes (instalação, roteiro manual, recon, erros comuns): [docs/guia-de-testes.md](docs/guia-de-testes.md).
+
 Documentação técnica: [docs/arquitetura.md](docs/arquitetura.md),
 [docs/decisoes.md](docs/decisoes.md), [docs/issnet-mapa.md](docs/issnet-mapa.md) e a rotina
 original em [docs/rotina-fiscal.pdf](docs/rotina-fiscal.pdf).
