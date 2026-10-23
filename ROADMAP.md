@@ -47,8 +47,9 @@ Construção incremental. Ao concluir uma fase: marcar aqui, registrar decisões
 
 - [ ] Abrir cada nota ("Visualizar") e extrair `InvoiceDetail`
 - [ ] Verificar se o ícone ao lado de "Visualizar" baixa o **XML** — se sim, preferir XML a HTML
-- [ ] **ADN para acesso DIRETO**: paginação por NSU, parsing do XML nacional, filtro por competência
-      (consulta confirmada em produção em 23/10/2026 — ver `docs/adn.md`; procuração não é aceita pelo ADN)
+- [x] **ADN para acesso DIRETO**: paginação por NSU, armazenamento local, leitura do XML nacional, filtro por competência — `condosys adn-notas`
+- [ ] ADN: tratar eventos (cancelamento/substituição) ao encontrar um caso real
+- [ ] ADN: confirmar no leiaute nacional `tpRetISSQN`, `cStat`, NT 07 (PIS/COFINS somados à CSLL)
 
 ## Fase 4 — Exportação Excel
 

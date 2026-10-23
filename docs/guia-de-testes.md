@@ -367,6 +367,21 @@ parsing da Fase 3.
 Com um condomínio de procuração, o comando recusa: o ADN só aceita certificado com a
 mesma raiz de CNPJ do consultado.
 
+### 4.5.1 Notas tomadas da competência pelo ADN
+
+```bash
+uv run condosys adn-notas --cert sema.pfx -c 09/2025         # notas tomadas pela Sema
+uv run condosys adn-notas "the sun" -c 09/2026                # condomínio com certificado próprio
+uv run condosys adn-notas --cert sema.pfx -c 09/2025 --sem-sincronizar   # só o que já baixou
+```
+
+Esperado: "N documentos novos em M consultas; último NSU X" e a tabela das notas em que o
+CNPJ é tomador, emitidas no mês (nº, emissão, prestador, código do serviço, valor, ISS
+retido, INSS, IRRF, CSLL/PCC, líquido). A primeira execução baixa o histórico inteiro (50
+por consulta, 1 s entre elas, até 100 consultas por vez — se avisar que faltam
+documentos, rode de novo). As seguintes só buscam as notas novas. Os XML ficam em
+`data/adn/<CNPJ>/` (fora do git).
+
 ### 4.6 Modo automático (referência)
 
 `CONDOSYS_LOGIN_MODE=automatic` usa o navegador do Playwright com o `.pfx` entregue

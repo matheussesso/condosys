@@ -6,6 +6,7 @@ import re
 import shutil
 import unicodedata
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -16,12 +17,20 @@ from rich.console import Console
 from rich.table import Table
 
 from condosys import __version__
-from condosys.adn import AdnError, decode_documents, fetch_dfe, same_cnpj_root
+from condosys.adn import (
+    AdnError,
+    AdnStore,
+    decode_documents,
+    fetch_dfe,
+    same_cnpj_root,
+    sync_documents,
+)
 from condosys.assisted_browser import AssistedLoginError
 from condosys.browser import BrowserSetupError
 from condosys.cert_store import CertStoreError, install_certificate
 from condosys.certificates import (
     CertificateError,
+    LoadedCertificate,
     list_certificate_files,
     load_pfx,
     read_certificate_info,
@@ -36,7 +45,7 @@ from condosys.config_loader import (
 from condosys.credentials import CredentialStoreError, delete_password, get_password, save_password
 from condosys.documents import format_cnpj
 from condosys.logging_setup import setup_logging
-from condosys.models import AccessMode, CertificateInfo, Condominium
+from condosys.models import AccessMode, CertificateInfo, Competence, Condominium
 from condosys.portals.issnet import selectors
 from condosys.portals.issnet.invoices_page import TakenInvoicesPage
 from condosys.portals.issnet.session import (
@@ -47,6 +56,7 @@ from condosys.portals.issnet.session import (
     needs_taxpayer_selection,
 )
 from condosys.recon import PageRecorder, new_recon_dir
+from condosys.services.adn_invoices import taken_invoices
 from condosys.settings import Settings, get_settings
 
 logger = logging.getLogger("condosys.cli")
@@ -620,6 +630,133 @@ def recon(
 # --- ADN (national NFS-e data environment) -------------------------------------------------
 
 
+def _adn_target(
+    settings: Settings, condominio: str | None, cert: str | None
+) -> tuple[LoadedCertificate, str, str | None]:
+    """Returns (certificate, CNPJ to query, cnpjConsulta) for the ADN commands."""
+    cnpj: str | None = None
+    if condominio is not None:
+        condominium = resolve_condominium(settings, condominio)
+        certificate_file, cnpj = condominium.certificate, condominium.cnpj
+    elif cert is not None:
+        certificate_file = cert
+    else:
+        raise _fail("informe o condomínio ou --cert <arquivo.pfx>.")
+    try:
+        password = get_password(certificate_file)
+    except CredentialStoreError as exc:
+        raise _fail(str(exc)) from exc
+    if password is None:
+        raise _fail(f"senha de {certificate_file} não cadastrada (condosys cert add).")
+    try:
+        loaded = load_pfx(settings.certs_dir / certificate_file, password)
+    except CertificateError as exc:
+        raise _fail(str(exc)) from exc
+    if loaded.info.cnpj is None:
+        raise _fail(f"{certificate_file} não tem CNPJ (o ADN exige e-CNPJ).")
+    if cnpj is not None and not same_cnpj_root(cnpj, loaded.info.cnpj):
+        raise _fail(
+            f"o ADN só aceita certificado com a mesma raiz de CNPJ do consultado. "
+            f"{certificate_file} é de {loaded.info.holder_name}; para condomínios por "
+            "procuração não há acesso automatizado liberado (ADR-010)."
+        )
+    target = cnpj or loaded.info.cnpj
+    return loaded, target, cnpj if cnpj != loaded.info.cnpj else None
+
+
+@app.command("adn-notas")
+def adn_notas(
+    competencia: Annotated[
+        str, typer.Option("--competencia", "-c", help="MM/AAAA (ex.: 09/2026).")
+    ],
+    condominio: Annotated[
+        str | None,
+        typer.Argument(help="Condomínio (acesso DIRETO). Omitido: use --cert."),
+    ] = None,
+    cert: Annotated[
+        str | None,
+        typer.Option("--cert", help="Certificado em certs/ (notas tomadas pelo próprio CNPJ)."),
+    ] = None,
+    sem_sincronizar: Annotated[
+        bool, typer.Option("--sem-sincronizar", help="Usa só o que já foi baixado.")
+    ] = False,
+) -> None:
+    """Lista as notas tomadas na competência, a partir da API oficial do ADN."""
+    settings = get_settings()
+    try:
+        competence = Competence.parse(competencia)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    loaded, target, cnpj_query = _adn_target(settings, condominio, cert)
+    store = AdnStore(settings.data_dir / "adn" / target)
+
+    if not sem_sincronizar:
+        console.print(
+            f"ADN: sincronizando {format_cnpj(target)} a partir do NSU {store.last_nsu}..."
+        )
+        try:
+            result = sync_documents(
+                settings.adn_base_url,
+                loaded,
+                store,
+                cnpj=cnpj_query,
+                pause_s=settings.adn_pause_ms / 1000,
+                max_batches=settings.adn_max_batches,
+            )
+        except AdnError as exc:
+            raise _fail(str(exc)) from exc
+        console.print(
+            f"{result.new_documents} documentos novos em {result.batches} consultas; "
+            f"último NSU {result.last_nsu}."
+        )
+        if not result.finished:
+            console.print(
+                "[yellow]Ainda há documentos a baixar: rode de novo para continuar.[/] "
+                "(As notas listadas abaixo podem estar incompletas.)"
+            )
+
+    invoices = taken_invoices(store.documents(), target, competence)
+    table = Table(title=f"Notas tomadas por {format_cnpj(target)} — {competence.label}")
+    for column in (
+        "Nº",
+        "Emissão",
+        "Prestador",
+        "Serviço",
+        "Valor",
+        "ISS retido",
+        "INSS",
+        "IRRF",
+        "CSLL/PCC",
+        "Líquido",
+    ):
+        table.add_column(
+            column,
+            justify="right"
+            if column in {"Valor", "ISS retido", "INSS", "IRRF", "CSLL/PCC", "Líquido"}
+            else "left",
+        )
+    for invoice in invoices:
+        table.add_row(
+            invoice.number,
+            f"{invoice.issue_date:%d/%m/%Y}",
+            f"{invoice.provider_name[:30]} ({format_cnpj(invoice.provider_document)})",
+            invoice.service_code or "-",
+            _brl(invoice.amount),
+            _brl(invoice.iss_withheld),
+            _brl(invoice.inss),
+            _brl(invoice.irrf),
+            _brl(invoice.social_contributions_withheld),
+            _brl(invoice.net_amount),
+        )
+    console.print(table)
+    console.print(f"{len(invoices)} notas. Dados locais em {store.root}")
+
+
+def _brl(value: Decimal) -> str:
+    text = f"{value:,.2f}"
+    return text.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 @app.command("adn-test")
 def adn_test(
     condominio: Annotated[
@@ -636,38 +773,12 @@ def adn_test(
 ) -> None:
     """Faz UMA consulta à API de distribuição do ADN e salva a resposta em debug/adn/."""
     settings = get_settings()
-    cnpj: str | None = None
-    if condominio is not None:
-        condominium = resolve_condominium(settings, condominio)
-        certificate_file, cnpj = condominium.certificate, condominium.cnpj
-    elif cert is not None:
-        certificate_file = cert
-    else:
-        raise _fail("informe o condomínio ou --cert <arquivo.pfx>.")
-
+    loaded, target, cnpj_query = _adn_target(settings, condominio, cert)
+    console.print(
+        f"ADN: consultando {format_cnpj(target)} com {loaded.info.holder_name}, NSU {nsu}..."
+    )
     try:
-        password = get_password(certificate_file)
-    except CredentialStoreError as exc:
-        raise _fail(str(exc)) from exc
-    if password is None:
-        raise _fail(f"senha de {certificate_file} não cadastrada (condosys cert add).")
-    try:
-        loaded = load_pfx(settings.certs_dir / certificate_file, password)
-    except CertificateError as exc:
-        raise _fail(str(exc)) from exc
-    if cnpj is not None and (
-        loaded.info.cnpj is None or not same_cnpj_root(cnpj, loaded.info.cnpj)
-    ):
-        raise _fail(
-            f"o ADN só aceita certificado com a mesma raiz de CNPJ do consultado. "
-            f"{certificate_file} é de {loaded.info.holder_name}; para condomínios por "
-            "procuração use o portal (login assistido)."
-        )
-
-    target = format_cnpj(cnpj or loaded.info.cnpj or "-")
-    console.print(f"ADN: consultando {target} com {loaded.info.holder_name}, NSU {nsu}...")
-    try:
-        response = fetch_dfe(settings.adn_base_url, loaded, nsu, cnpj=cnpj)
+        response = fetch_dfe(settings.adn_base_url, loaded, nsu, cnpj=cnpj_query)
     except AdnError as exc:
         raise _fail(str(exc)) from exc
 

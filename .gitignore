@@ -11,7 +11,8 @@ config/condominios.xlsx
 # Perfil do navegador do login assistido (cookies de sessão)
 browser-profile/
 
-# Saídas e depuração (podem conter dados fiscais)
+# Saídas, dados baixados e depuração (contêm dados fiscais)
+data/
 output/
 logs/
 debug/

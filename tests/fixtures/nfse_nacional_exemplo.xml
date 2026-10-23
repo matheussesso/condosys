@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Synthetic national NFS-e (fictitious data) with the structure seen in the ADN on 23/10/2026. -->
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+  <infNFSe Id="NFS53001082211222333000181000000000000126090000000001">
+    <xLocEmi>Brasília</xLocEmi>
+    <xLocPrestacao>Brasília</xLocPrestacao>
+    <nNFSe>123</nNFSe>
+    <cLocIncid>5300108</cLocIncid>
+    <xLocIncid>Brasília</xLocIncid>
+    <xTribNac>Reparação, conservação e reforma de edifícios</xTribNac>
+    <verAplic>1.0</verAplic>
+    <ambGer>2</ambGer>
+    <tpEmis>1</tpEmis>
+    <procEmi>2</procEmi>
+    <cStat>100</cStat>
+    <dhProc>2026-09-15T10:05:00-03:00</dhProc>
+    <nDFSe>99999</nDFSe>
+    <emit>
+      <CNPJ>11222333000181</CNPJ>
+      <xNome>PRESTADOR FICTICIO LTDA</xNome>
+    </emit>
+    <valores>
+      <vBC>1000.00</vBC>
+      <pAliqAplic>5.00</pAliqAplic>
+      <vISSQN>50.00</vISSQN>
+      <vTotalRet>206.50</vTotalRet>
+      <vLiq>793.50</vLiq>
+    </valores>
+    <DPS versao="1.00">
+      <infDPS Id="DPS000">
+        <tpAmb>1</tpAmb>
+        <dhEmi>2026-09-15T10:00:00-03:00</dhEmi>
+        <serie>1</serie>
+        <nDPS>10</nDPS>
+        <dCompet>2026-09-15</dCompet>
+        <tpEmit>1</tpEmit>
+        <cLocEmi>5300108</cLocEmi>
+        <prest>
+          <CNPJ>11222333000181</CNPJ>
+          <regTrib><opSimpNac>1</opSimpNac><regEspTrib>0</regEspTrib></regTrib>
+        </prest>
+        <toma>
+          <CNPJ>12166128000109</CNPJ>
+          <xNome>CONDOMINIO FICTICIO</xNome>
+        </toma>
+        <serv>
+          <locPrest><cLocPrestacao>5300108</cLocPrestacao></locPrest>
+          <cServ><cTribNac>070501</cTribNac><xDescServ>MANUTENCAO PREDIAL</xDescServ></cServ>
+        </serv>
+        <valores>
+          <vServPrest><vServ>1000.00</vServ></vServPrest>
+          <trib>
+            <tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>2</tpRetISSQN><pAliq>5.00</pAliq></tribMun>
+            <tribFed>
+              <piscofins><CST>01</CST><vPis>6.50</vPis><vCofins>30.00</vCofins></piscofins>
+              <vRetCP>110.00</vRetCP>
+              <vRetIRRF>0.00</vRetIRRF>
+              <vRetCSLL>46.50</vRetCSLL>
+            </tribFed>
+            <totTrib><indTotTrib>0</indTotTrib></totTrib>
+          </trib>
+        </valores>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>

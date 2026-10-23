@@ -114,6 +114,7 @@ modo invisível, tempos de espera e pausas entre ações. **Nunca** coloque senh
 | `condosys login-test <condomínio>` | faz login no ISSNet, confere o CNPJ na página e salva screenshot em `debug/` |
 | `condosys recon <condomínio>` | login + Playwright Inspector; salva HTML/screenshot de cada tela em `debug/recon/` |
 | `condosys adn-test <condomínio>` | uma consulta à API do ADN (acesso DIRETO); salva a resposta em `debug/adn/` |
+| `condosys adn-notas <condomínio> -c 09/2026` | baixa as notas novas do ADN e lista as tomadas na competência (`--cert` para o CNPJ do certificado) |
 
 Todos os comandos aceitam `--help`. Use `uv run condosys -v <comando>` para log detalhado.
 

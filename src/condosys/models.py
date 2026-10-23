@@ -209,6 +209,9 @@ class InvoiceDetail(Invoice):
     taker_document: Document
     taker_name: str
     raw_source: Literal["html", "xml"]
+    # National NFS-e (ADN): 50-digit access key and the competence date of the DPS.
+    access_key: str | None = None
+    competence_date: date | None = None
 
 
 class Severity(StrEnum):

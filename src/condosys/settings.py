@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     browser_profile_dir: Path = Path("browser-profile")
     config_file: Path = Path("config/condominios.xlsx")
     output_dir: Path = Path("output")
+    # Local data downloaded from official APIs (fiscal data, git-ignored).
+    data_dir: Path = Path("data")
     logs_dir: Path = Path("logs")
     debug_dir: Path = Path("debug")
 
@@ -70,6 +72,9 @@ class Settings(BaseSettings):
     issnet_cert_origins: list[str] = ["https://api.ihub.com.br"]
     # National NFS-e data environment (ADN), contributor distribution API.
     adn_base_url: str = "https://adn.nfse.gov.br"
+    # One request at a time, with a pause; the next run continues after max_batches.
+    adn_pause_ms: int = Field(default=1_000, ge=0)
+    adn_max_batches: int = Field(default=100, ge=1)
     # Re-encode the .pfx in memory with modern algorithms before handing it to the browser
     # (A1 certificates often use legacy RC2/3DES encryption that OpenSSL 3 rejects).
     reencode_pfx: bool = True
@@ -82,6 +87,7 @@ class Settings(BaseSettings):
             "browser_profile_dir",
             "config_file",
             "output_dir",
+            "data_dir",
             "logs_dir",
             "debug_dir",
         ):

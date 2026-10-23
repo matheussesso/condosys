@@ -19,15 +19,22 @@ comando de teste: `condosys adn-test`.
 - A Sema aparece como **tomadora** nas 50; emissões de 09/2023 a 12/2025 (o lote começa
   pelo NSU mais antigo — é preciso paginar até o fim para chegar às notas recentes).
 
-## Paginação (a implementar na Fase 3)
+## Sincronização e uso (implementado)
 
-- Chamar com o último NSU recebido até vir menos de 50 itens ou outro
-  `StatusProcessamento` (ex.: nenhum documento).
-- Guardar o último NSU por CNPJ (SQLite local), para as próximas execuções buscarem só as
-  notas novas.
-- Filtrar a competência no condosys, por `dCompet` (ou `dhEmi`).
-- Cancelamentos/substituições chegam como eventos (`/NFSe/{ChaveAcesso}/Eventos` ou itens
-  de outro `TipoDocumento`) — confirmar ao encontrar um caso.
+- `adn.sync_documents`: chama `GET /contribuintes/DFe/{NSU}?lote=true` a partir do último
+  NSU guardado, uma consulta por vez, com pausa (`CONDOSYS_ADN_PAUSE_MS`, padrão 1 s), até
+  vir menos de 50 itens, outro `StatusProcessamento` ou HTTP 404; no máximo
+  `CONDOSYS_ADN_MAX_BATCHES` lotes por execução (a próxima continua). NSUs repetidos são
+  ignorados.
+- Armazenamento local em `data/adn/<CNPJ>/` (fora do git): `<NSU>_<TIPO>.xml` (XML como
+  veio), `<NSU>_<TIPO>.key` (chave de acesso) e `state.json` (`last_nsu`).
+- `nfse_nacional.parse_nfse_xml`: XML → `InvoiceDetail` (validado com as 50 notas reais).
+- `services.adn_invoices.taken_invoices`: notas em que o CNPJ é **tomador**, com **data
+  de emissão** dentro da competência (como na rotina manual); eventos são ignorados.
+- Comando: `condosys adn-notas <condomínio> -c 09/2026` (ou `--cert sema.pfx`);
+  `--sem-sincronizar` usa só o que já foi baixado.
+- Pendente: cancelamentos/substituições (eventos, `/NFSe/{ChaveAcesso}/Eventos`) — tratar
+  ao encontrar um caso real.
 
 ## Campos encontrados → modelo `InvoiceDetail`
 
@@ -41,7 +48,7 @@ Caminhos relativos a `/NFSe/infNFSe`. "n/50" = em quantas das 50 notas o campo a
 | (competência) | `DPS/infDPS/dCompet` | 50/50 |
 | `amount` | `DPS/infDPS/valores/vServPrest/vServ` | 50/50 |
 | `iss_amount` | `valores/vISSQN` | 23/50 |
-| `tax_withheld` / `iss_withheld` | `DPS/infDPS/valores/trib/tribMun/tpRetISSQN` (`1` em todas; confirmar a tabela de códigos no leiaute nacional) | 50/50 |
+| `tax_withheld` / `iss_withheld` | `DPS/infDPS/valores/trib/tribMun/tpRetISSQN` — o condosys considera `2` (tomador) e `3` (intermediário) como retido; `1` em todas as 50 notas; confirmar no leiaute nacional | 50/50 |
 | `provider_document` | `emit/CNPJ` (e `DPS/infDPS/prest/CNPJ`) | 50/50 |
 | `provider_name` | `emit/xNome` | 50/50 |
 | `taker_document` | `DPS/infDPS/toma/CNPJ` | 50/50 |
