@@ -389,7 +389,8 @@ Pasta `debug/recon/<AAAAMMDD-HHMMSS>/`:
 | `não foi possível abrir o navegador (rode: uv run playwright install chromium)` | Chromium não instalado | rode o comando; no Linux, também `playwright install-deps chromium` |
 | `os scripts de login do portal não carregaram (o Cloudflare bloqueia...)` | navegador em modo invisível | `CONDOSYS_HEADLESS=false` no `.env` e não use `--headless` |
 | `o handshake TLS com o certificado falhou` | o iHub recusou o certificado (vencido, AC não aceita, `.pfx` errado) | `cert list` para conferir validade/titular; guarde a mensagem completa |
-| `alerta do portal: Certificado digital inválido ou não apresentado.` | iHub código 457 | confira se `CONDOSYS_ISSNET_CERT_ORIGINS` contém `https://api.ihub.com.br` |
+| `alerta do portal: Certificado digital inválido ou não apresentado.` | iHub código 457: o certificado não chegou ao iHub. Causa mais comum: `.env` antigo com `CONDOSYS_ISSNET_CERT_ORIGINS=["https://iss.fazenda.df.gov.br"]` (o log mostra "Contexto criado com o certificado ... para https://iss.fazenda...") | deixe `CONDOSYS_ISSNET_CERT_ORIGINS=["https://api.ihub.com.br"]` no `.env`; se a origem já estiver certa, o iHub não aceitou o certificado (confira validade e titular) |
+| `o popup de autenticação abriu em <origem>, mas o certificado só é enviado para ...` | a origem configurada não é a do popup | copie a linha sugerida na mensagem para o `.env` |
 | `alerta do portal: Certificado digital revogado.` | iHub código 456 | certificado precisa ser substituído |
 | `alerta do portal: Token de licença inválido ou saldo zerado.` | iHub código 403 — licença do portal | problema do portal/licença, não do condosys; tente mais tarde |
 | `alerta do portal: Muitas requisições...` | iHub código 429 | aguarde alguns minutos |

@@ -83,9 +83,12 @@ class IssnetSession:
         self.page = page
         self.settings = settings
         self.popups: list[Page] = []
+        self.popup_origins: list[str] = []
         self.dialog_messages: list[str] = []
         self._failed_documents: list[tuple[str, str]] = []
-        page.on("requestfailed", self._on_request_failed)
+        # Context-level, so popup requests are seen from the very first one.
+        page.context.on("request", self._on_request)
+        page.context.on("requestfailed", self._on_request_failed)
         page.on("popup", self._on_popup)
         page.on("dialog", self._on_dialog)
 
@@ -96,7 +99,17 @@ class IssnetSession:
     def _on_popup(self, popup: Page) -> None:
         logger.info("Popup aberto: %s", _without_query(popup.url))
         self.popups.append(popup)
-        popup.on("requestfailed", self._on_request_failed)
+
+    def _on_request(self, request: Request) -> None:
+        # Documents outside the portal origin are the authentication popup. Kept at request
+        # time: after a TLS failure the popup URL becomes chrome-error://. (request.frame is
+        # not usable here: it does not exist yet for a popup's first navigation.)
+        if request.resource_type != "document":
+            return
+        origin = _origin(request.url)
+        portal = _origin(self.settings.issnet_login_url)
+        if origin.startswith("https://") and origin != portal and origin not in self.popup_origins:
+            self.popup_origins.append(origin)
 
     def _on_dialog(self, dialog: Dialog) -> None:
         # The login page reports iHub errors with alert(); keep the text and close it.
@@ -189,6 +202,13 @@ class IssnetSession:
 
     def _login_error(self, message: str, exc: Exception) -> LoginError:
         details = [message]
+        for origin in self.popup_origins:
+            if origin not in self.settings.issnet_cert_origins:
+                details.append(
+                    f"o popup de autenticação abriu em {origin}, mas o certificado só é enviado "
+                    f"para {', '.join(self.settings.issnet_cert_origins)}: ajuste "
+                    f'CONDOSYS_ISSNET_CERT_ORIGINS=["{origin}"] no .env'
+                )
         for popup in self.popups:
             if popup.is_closed():
                 continue

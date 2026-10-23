@@ -407,3 +407,19 @@ def test_recorder_captures_loads_button_and_requests(
     requests_log = (out / "requests.log").read_text(encoding="utf-8")
     assert "/Login/Login.aspx" in requests_log
     assert "Cookie" not in requests_log
+
+
+def test_issnet_login_explains_wrong_certificate_origin(
+    browser: Browser, fake_portal: tuple[str, str, Path], tmp_path: Path
+) -> None:
+    portal, ihub, legacy = fake_portal
+    settings = _portal_settings(tmp_path, portal, ihub, legacy)
+    # Certificate configured for another origin, as an outdated .env would do.
+    settings = settings.model_copy(update={"issnet_cert_origins": ["https://iss.example"]})
+    context = new_certificate_context(browser, settings, "the-sun.pfx", ignore_https_errors=True)
+    try:
+        session = IssnetSession(context.new_page(), settings)
+        with pytest.raises(LoginError, match=f"o popup de autenticação abriu em {ihub}"):
+            session.login()
+    finally:
+        context.close()
