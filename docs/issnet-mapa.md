@@ -37,6 +37,30 @@ URL: `https://iss.fazenda.df.gov.br/online/Login/Login.aspx?ReturnUrl=%2fonline`
 Observações: com o navegador invisível (headless) o Cloudflare bloqueia os scripts de
 `www.notacontrol.com.br` e o botão não funciona; use sempre a janela visível.
 
+## 1.1 Seleção de empresa (procuração) — `default/empresas.aspx`
+
+Vista em 23/10/2026 (print do login manual no Firefox com o certificado da Sema). Após o
+login por procuração, o portal vai direto para esta tela (URL
+`https://iss.fazenda.df.gov.br/online/default/empresas.aspx?<parâmetro cifrado>`).
+Seletores ainda não capturados — só o que aparece na tela:
+
+| elemento | observação | status |
+|---|---|---|
+| título "Empresas" / "Selecione a Empresa" | | 🟡 texto |
+| filtro Inscrição Municipal | campo texto | ❌ |
+| filtro CPF / CNPJ | campo texto — usar para achar o condomínio | ❌ |
+| filtro Nome / Razão Social | campo texto | ❌ |
+| Mês / Ano | selects (ex.: "Setembro" / "2026") — **competência escolhida aqui** | ❌ |
+| botão Localizar | ícone de lupa | ❌ |
+| grade | colunas: Nome / Razão Social, CPF/CNPJ (formatado), Insc. Municipal, Status, Recadastrado, Denominação, Selecione | ❌ |
+| botão Selecione (✓ verde) por linha | entra no ambiente do condomínio | ❌ |
+| paginação | links "1 2 3 4" (10 linhas por página) | ❌ |
+| cabeçalho | nome do certificado ("Sema Contabilidade e..."), "Sair", "Acessado em: dd/mm/aaaa hh:mm:ss" | ❌ |
+
+Consequências: a seleção do contribuinte da procuração é uma **tela própria** (não um
+seletor no cabeçalho); a competência provavelmente já é definida aqui. Filtrar por CNPJ +
+Localizar + Selecione deve bastar para automatizar (Fase 1/2, após o recon).
+
 ## 2. Cabeçalho (após login)
 
 | elemento | seletor | status |
