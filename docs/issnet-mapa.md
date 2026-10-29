@@ -1,4 +1,8 @@
-# Mapa do ISSNet On-Line (DF)
+# Mapa do ISSNet On-Line (DF) — histórico
+
+> **Arquivado em 29/10/2026 (ADR-011).** O condosys não acessa mais o portal ISSNet: o
+> iHub bloqueou o acesso automatizado (ADR-010) e as notas passaram a vir da API do ADN.
+> Este mapa e o código correspondente (até o commit `d8a2378`) ficam só como registro.
 
 Mapa das telas e seletores do portal. **Preencher a partir do material do recon**
 (`debug/recon/<timestamp>/`), nunca de memória. Cada seletor confirmado aqui deve ir para

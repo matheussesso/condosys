@@ -1,75 +1,68 @@
 # Arquitetura
 
-## Visão geral
-
 ```
-condosys (CLI Typer)
-   │
-   ├── config_loader ──► config/condominios.xlsx  (quais condomínios, qual certificado)
-   ├── certificates  ──► certs/*.pfx               (titular, CNPJ, validade)
-   ├── credentials   ──► cofre do sistema (keyring)
-   │
-   └── services/collect (orquestração, um condomínio por vez)
-          │
-          ├── browser            um BrowserContext por certificado (client_certificates)
-          ├── portals/issnet
-          │     ├── session        login, seleção do contribuinte, conferência, logout
-          │     ├── invoices_page  Consulta de Notas Tomadas (navega, devolve HTML)
-          │     ├── parsers        HTML/XML → modelos (funções puras)
-          │     └── selectors      todos os seletores do portal
-          └── exporters/excel    output/notas_<competencia>_<data-hora>.xlsx
+ Electron (desktop/)                      Python (src/condosys/)
+ ┌──────────────────────┐   HTTP local   ┌───────────────────────────────────────────┐
+ │ renderer/ (tela)     │ ─────────────► │ api.py (FastAPI, 127.0.0.1, token)        │
+ │ preload.js (ponte)   │   + token      │ cli.py (Typer)                            │
+ │ main.js (processo)   │ ── inicia ───► │      │                                    │
+ └──────────────────────┘ condosys serve │      ▼                                    │
+                                         │ services/  certificates · condominiums ·  │
+                                         │            collect · adn_invoices         │
+                                         │      │                                    │
+                                         │      ▼                                    │
+                                         │ adn.py ── mTLS ──► adn.nfse.gov.br        │
+                                         │ nfse_nacional.py (XML → InvoiceDetail)    │
+                                         │ exporters/excel.py (planilha da coleta)   │
+                                         │ certificates.py · credentials.py (cofre)  │
+                                         │ config_loader.py (condominios.xlsx)       │
+                                         └───────────────────────────────────────────┘
 ```
 
-## Módulos
+## Camadas
 
-| módulo | responsabilidade |
-|---|---|
-| `cli.py` | comandos Typer, saída Rich; nenhuma regra de negócio pesada |
-| `settings.py` | configurações (`CONDOSYS_*`, `.env`); caminhos relativos à pasta do projeto |
-| `logging_setup.py` | console Rich + `logs/condosys.log` rotativo (2 MB × 5) |
-| `models.py` | modelos Pydantic v2; `Money` (aceita `"1.234,56"`, recusa `float`) |
-| `documents.py` | CNPJ: normalização, dígitos verificadores (inclusive alfanumérico), formatação |
-| `config_loader.py` | lê/valida a planilha, erros por linha/coluna, busca por nome/CNPJ, gera o exemplo |
-| `certificates.py` | abre `.pfx`, extrai dados públicos, recodifica PKCS#12 em memória |
-| `credentials.py` | senha do `.pfx` no keyring (serviço `condosys`, conta `pfx:<arquivo>`) |
-| `browser.py` | Playwright: lançar navegador, criar contexto com certificado |
-| `portals/issnet/*` | Page Objects e parsers do ISSNet DF |
-| `exporters/excel.py` | planilha de saída (Fase 4) |
-| `services/collect.py` | fluxo completo por condomínio, erros não interrompem o lote (Fases 2–4) |
+- **`services/`**: regras de uso compartilhadas pela CLI e pela API. Nenhuma tela chama
+  `adn.py` ou o cofre diretamente.
+- **`adn.py`**: cliente da API de distribuição do ADN. Uma consulta por vez, pausa entre
+  lotes, sincronização incremental por NSU, armazenamento em `data/adn/<CNPJ>/`.
+- **`nfse_nacional.py`**: parser puro do XML nacional, testado com fixture sintética.
+- **`exporters/excel.py`**: planilha da coleta (Notas, Resumo, Erros, controles).
+- **`api.py`**: API local. Coletas rodam numa thread, uma de cada vez; a tela acompanha
+  por consulta periódica (`GET /api/jobs/{id}`).
 
-## Princípios
+## Fluxo da coleta
 
-1. **Navegação ≠ parsing.** Page Objects só clicam, preenchem e devolvem HTML/bytes.
-   Parsers são funções puras testadas com HTML real salvo em `tests/fixtures/`.
-2. **Seletores num só lugar** (`selectors.py`), preenchidos a partir do recon, nunca inventados.
-3. **Isolamento por certificado.** Cada condomínio (ou cada certificado de procuração)
-   usa um `BrowserContext` novo: sem cookies, cache ou certificado de outra sessão. Isso
-   resolve o problema atual de "trocar certificado / fechar sessão" no Edge.
-4. **Falha isolada.** Na coleta em lote, um condomínio com erro vira uma linha na aba
-   "Erros" e o lote continua.
-5. **Portal respeitado.** Sequencial, `slow_mo`, timeouts e pausas configuráveis.
+1. A planilha de condomínios lista CNPJ e arquivo do certificado de cada condomínio.
+2. Para cada condomínio ativo, um por vez: a senha sai do cofre, o `.pfx` é aberto em
+   memória, e o ADN é consultado com mTLS a partir do último NSU baixado.
+3. Os XML novos vão para `data/adn/<CNPJ>/`. Ficam ali as notas em que o condomínio é
+   tomador, emitidas dentro da competência.
+4. Uma falha num condomínio vai para a aba "Erros" e a coleta segue.
+5. Ao final, a planilha é gravada em `output/`.
 
-## Fluxo de login (Fase 1)
+## Interface (Electron)
 
-1. `config_loader` encontra o condomínio e o arquivo do certificado.
-2. `credentials` lê a senha do keyring; `certificates` abre o `.pfx` e (por padrão)
-   recodifica o PKCS#12 em memória com AES-256.
-3. `browser` cria o contexto com
-   `client_certificates=[{"origin": "https://api.ihub.com.br", "pfx": <bytes>, "passphrase": <aleatória>}]`.
-4. `session` abre a página de login, confere se os scripts do portal carregaram e clica
-   em `#btnAcionaCertificado`. O portal abre um popup em `api.ihub.com.br/auth`, onde o
-   navegador apresenta o certificado no handshake TLS (sem janela de seleção); o popup
-   devolve um ticket e a página entra no portal. Erros de TLS no popup e `alert()` do
-   portal interrompem o login na hora (ADR-007).
-5. Procuração: seleção do contribuinte no cabeçalho (seletor a capturar no recon; até lá
-   o usuário escolhe manualmente na janela e confirma no terminal).
-6. Conferência: o CNPJ/nome do condomínio deve aparecer na página (cabeçalho).
+- `main.js` inicia `condosys serve --port 0` (em desenvolvimento, via `uv run`) com um
+  token aleatório em `CONDOSYS_API_TOKEN` e espera a linha `{"event":"ready","port":N}`.
+- O backend termina quando a interface fecha: ela fecha o stdin dele
+  (`CONDOSYS_EXIT_ON_STDIN_EOF=1`). No Windows a árvore de processos é encerrada com
+  `taskkill /T`.
+- A página roda isolada (`contextIsolation`, `sandbox`, sem Node). O acesso ao sistema
+  operacional (escolher arquivo, abrir planilha) passa pelo `preload.js`. Só abre
+  arquivos dentro da pasta do condosys.
+- Distribuição (fase 9): backend empacotado com PyInstaller em `resources/backend/`, e o
+  instalador gerado com electron-builder.
 
 ## Multiplataforma
 
-- Caminhos com `pathlib`; nomes de arquivo sem `:`; arquivos de texto em UTF-8.
-- Keyring: Credential Manager (Windows) e Secret Service (Linux).
-- Navegador: Chromium do Playwright nos dois sistemas; opcionalmente o Edge instalado
-  (`CONDOSYS_BROWSER_CHANNEL=msedge`) no Windows. Sempre com janela visível (o Cloudflare
-  bloqueia o modo invisível).
-- Distribuição futura: executável PyInstaller (Fase 8).
+- Caminhos com `pathlib`, nomes de arquivo sem `:`, UTF-8 em todos os textos.
+- Cofre: Gerenciador de Credenciais (Windows) e Secret Service (Linux).
+- Fontes da interface: Bahnschrift e Segoe UI (Windows). No Linux, as equivalentes do
+  sistema.
+
+## Próximas integrações
+
+- **EFD-Reinf** (R-2010, R-4020, R-2099/R-4099): webservice oficial com o certificado do
+  condomínio, sempre primeiro em produção restrita.
+- **Integra Contador** (Serpro): DCTFWeb e DARF.
+- **Google Sheets**: conta de serviço, lançamento só de notas aprovadas.

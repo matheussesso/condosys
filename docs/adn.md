@@ -1,8 +1,8 @@
 # ADN — Ambiente de Dados Nacional da NFS-e
 
-Fonte oficial para condomínios com **acesso DIRETO** (certificado com a mesma raiz de CNPJ
-do condomínio). Procuração não é aceita (ADR-009). Código: `src/condosys/adn.py`;
-comando de teste: `condosys adn-test`.
+Fonte oficial das notas tomadas de todos os condomínios, cada um com o próprio certificado
+(mesma raiz de CNPJ; procuração não é aceita). Código: `src/condosys/adn.py`; comandos:
+`condosys notas`, `condosys coletar`, `condosys adn-test` (diagnóstico).
 
 ## Primeiro teste real — 23/10/2026
 
@@ -42,7 +42,7 @@ suporte do ISSNet sobre o webservice (ADR-010) ou consulta manual.
 - `nfse_nacional.parse_nfse_xml`: XML → `InvoiceDetail` (validado com as 50 notas reais).
 - `services.adn_invoices.taken_invoices`: notas em que o CNPJ é **tomador**, com **data
   de emissão** dentro da competência (como na rotina manual); eventos são ignorados.
-- Comando: `condosys adn-notas <condomínio> -c 09/2026` (ou `--cert sema.pfx`);
+- Comandos: `condosys notas <condomínio> -c 09/2026` e `condosys coletar -c 09/2026`;
   `--sem-sincronizar` usa só o que já foi baixado.
 - Pendente: cancelamentos/substituições (eventos, `/NFSe/{ChaveAcesso}/Eventos`) — tratar
   ao encontrar um caso real.

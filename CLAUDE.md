@@ -1,55 +1,56 @@
 # CLAUDE.md — condosys
 
-Automação da rotina fiscal de condomínios no DF: login no portal **ISSNet On-Line** com
-certificado A1 (`.pfx`), consulta de Notas Tomadas, detalhe das notas e exportação para
-Excel. Usuários finais em **Windows**; desenvolvimento em **Linux**. Tudo deve rodar nos dois.
-Rotina original: `docs/rotina-fiscal.pdf`. Fases: `ROADMAP.md`.
+Rotina fiscal dos condomínios atendidos pelo escritório (DF): notas de serviço tomadas
+pela API oficial do **ADN** (NFS-e nacional) com o certificado A1 de **cada
+condomínio**; planilha da coleta (Notas, Resumo, Erros, Controles PIS/INSS/ISSQN);
+próximas fases: pré-análise de retenções, Google Sheets, EFD-Reinf, DCTFWeb/DARF via
+Integra Contador. Interface em **Electron** (`desktop/`) sobre uma API local em Python.
+Usuários finais em **Windows**; desenvolvimento em **Linux**. Rotina original:
+`docs/rotina-fiscal.pdf`. Fases: `ROADMAP.md`.
 
 ## Comandos
 
 ```bash
-uv sync                                   # dependências
-uv run playwright install chromium        # navegador
-uv run condosys --help                    # CLI
-uv run pytest                             # testes (inclui os de navegador, marcador "browser")
-uv run pytest -m "not browser"            # sem Chromium
+uv sync
+uv run condosys --help
+uv run pytest
 uv run ruff check . && uv run ruff format --check .
-uv run mypy                               # strict no pacote
+uv run mypy                                   # strict no pacote
+cd desktop && npm install && npm start        # interface (Linux/VS Code: env -u ELECTRON_RUN_AS_NODE npm start)
+cd desktop && npm run screenshot              # telas em debug/ui/ para revisão visual
 ```
 
 Antes de concluir qualquer mudança: `ruff check`, `ruff format`, `mypy` e `pytest` passando.
 
 ## Arquitetura (resumo)
 
-- `cli.py` (Typer) → `services/` (orquestração) → `portals/issnet/` (Page Objects) + `parsers.py` (puro) → `exporters/`.
-- `browser.py`: um `BrowserContext` novo **por certificado**, com `client_certificates` do Playwright.
-- Login do ISSNet: popup `https://api.ihub.com.br/auth` pede o certificado no TLS (ADR-007). O Cloudflare reprova navegador automatizado: o padrão é o **login assistido** (`assisted_browser.py`, ADR-009) — pessoa loga no Chrome/Edge comum, condosys conecta via CDP depois. Nunca tentar contornar a verificação. Cada login debita saldo no iHub.
-- **ADR-010:** o iHub bloqueou o acesso automatizado ("deve usar o webservice", Ref. 568F9D19). Automação do portal desligada por padrão (`issnet_automation_authorized`). Nunca contornar; caminho é ADN ou webservice autorizado pelo suporte.
-- Acesso DIRETO: API oficial do ADN (`adn.py`), mTLS, certificado com mesma raiz de CNPJ. Layout real e mapeamento em `docs/adn.md`.
-- `recon.py`: gravador de páginas para o recon (`debug/recon/<timestamp>/`).
-- `certificates.py` (cryptography) lê `.pfx`; `credentials.py` (keyring) guarda senhas; `config_loader.py` lê `config/condominios.xlsx`.
-- `settings.py` (pydantic-settings, prefixo `CONDOSYS_`, `.env`); `models.py` (Pydantic v2).
-- Detalhes em `docs/arquitetura.md`; decisões em `docs/decisoes.md`.
+- `cli.py` (Typer) e `api.py` (FastAPI local) → `services/` (certificates, condominiums, collect, adn_invoices) → `adn.py` (mTLS, NSU, `data/adn/<CNPJ>/`), `nfse_nacional.py` (parser puro), `exporters/excel.py`.
+- `certificates.py` (cryptography) lê `.pfx`; `credentials.py` (keyring) guarda senhas; `config_loader.py` lê/grava `config/condominios.xlsx` (sem `modo_acesso`).
+- `desktop/`: `main.js` inicia `condosys serve --port 0` com token em `CONDOSYS_API_TOKEN`; `preload.js` é a única ponte; `renderer/` é HTML/CSS/JS sem build. Página isolada (sandbox, sem Node).
+- Decisões: `docs/decisoes.md` (ADR-010: iHub bloqueou automação; ADR-011: só APIs oficiais). Layout do ADN: `docs/adn.md`.
+
+## Regras
+
+- **Sem web scraping, sem automação de portal, nunca contornar verificações anti-robô.** Só APIs oficiais (ADN, EFD-Reinf, Integra Contador, Google Sheets).
+- Transmissões com efeito legal/financeiro (Reinf, DCTFWeb, DARF): gerar → revisar → confirmação explícita da pessoa → transmitir; primeiro em produção restrita.
+- O sistema sinaliza, o funcionário decide: valores das abas de controle são propostas.
 
 ## Convenções
 
-- Identificadores, comentários inline e docstrings (estilo Google) em **inglês**; documentação (`README.md`, `docs/`, `ROADMAP.md`, este arquivo) e mensagens ao usuário em **português**.
-- Type hints em tudo (mypy strict).
-- **Navegação separada de parsing**: Page Objects só navegam e devolvem HTML/dados brutos; parsers são funções puras (HTML/XML → modelos Pydantic), testadas com fixtures em `tests/fixtures/`.
-- Seletores centralizados em `portals/<portal>/selectors.py`, nunca espalhados.
-- **Nunca inventar seletores.** Usar o material de `debug/recon/` e `docs/issnet-mapa.md`; se faltar, deixar `TODO: capturar via recon` e explicar como obter.
-- Dinheiro sempre `Decimal` (nunca `float`); datas como `date`.
-- CNPJ normalizado internamente (`documents.normalize_cnpj`; aceita o CNPJ alfanumérico), formatado só na saída.
+- Identificadores, comentários inline e docstrings (Google) em **inglês**; documentação e mensagens ao usuário em **português**.
+- Type hints em tudo (mypy strict). Parsers puros testados com fixtures em `tests/fixtures/` (sintéticas ou anonimizadas).
+- Dinheiro sempre `Decimal`; datas como `date`. CNPJ normalizado internamente (`documents.normalize_cnpj`, aceita alfanumérico), formatado só na saída.
 - Caminhos com `pathlib`; nomes de arquivo sem `:` (Windows).
+- Interface: textos em português, frase com maiúscula só no início; DOM montado com `textContent` (nunca `innerHTML` com dados).
 
 ## Segurança
 
-- `.pfx` só em `certs/` (fora do git). Senhas só no keyring. Nunca em arquivo, código ou log.
-- Nunca logar senhas, conteúdo de certificados nem cookies de sessão.
-- `debug/` e `output/` contêm dados fiscais: fora do git; não copiar para fixtures sem anonimizar CNPJs/nomes de terceiros quando possível.
-- Respeitar o portal: um condomínio por vez, pausas curtas (`slow_mo_ms`), timeouts configuráveis, sem paralelismo.
-- Testes nunca usam o cofre real (`tests/conftest.py` troca por um keyring em memória).
+- `.pfx` só em `certs/`; senhas só no keyring. Nunca em arquivo, código, log ou resposta da API.
+- `data/`, `output/`, `logs/`, `debug/` têm dados fiscais: fora do git.
+- API local só em 127.0.0.1, sempre com token; a interface só abre arquivos dentro da pasta do condosys.
+- ADN: uma consulta por vez, com pausa; sem paralelismo.
+- Testes nunca usam o cofre real nem serviços reais.
 
 ## Ao concluir uma fase
 
-Sempre atualizar `ROADMAP.md` (checklist), `docs/guia-de-testes.md` (roteiro da fase) e `docs/decisoes.md` (decisões e problemas encontrados), e fazer um commit por fase com mensagem clara em português.
+Atualizar `ROADMAP.md`, `docs/guia-de-testes.md` e `docs/decisoes.md`; um commit por fase em português.

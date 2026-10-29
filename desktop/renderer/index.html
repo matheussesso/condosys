@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src http://127.0.0.1:*">
+  <title>condosys</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">condosys</div>
+    <nav aria-label="Seções">
+      <button class="nav-item" data-view="coleta" aria-current="page">Coleta do mês</button>
+      <button class="nav-item" data-view="condominios">Condomínios</button>
+      <button class="nav-item" data-view="certificados">Certificados</button>
+      <button class="nav-item" data-view="planilhas">Planilhas geradas</button>
+    </nav>
+    <p class="sidebar-foot" id="connection">Conectando…</p>
+  </aside>
+
+  <main>
+    <div class="banner" id="banner" hidden></div>
+
+    <!-- Coleta do mês -->
+    <section class="view" id="view-coleta">
+      <header class="ledger-head">
+        <div class="month-picker">
+          <button class="icon-button" id="prev-month" aria-label="Mês anterior">‹</button>
+          <h1 class="month" id="month-label">—</h1>
+          <button class="icon-button" id="next-month" aria-label="Próximo mês">›</button>
+        </div>
+        <p class="hint">Notas de serviço tomadas pelos condomínios, emitidas neste mês, baixadas do
+          Ambiente de Dados Nacional da NFS-e com o certificado de cada condomínio.</p>
+      </header>
+
+      <div class="toolbar">
+        <label class="check"><input type="checkbox" id="select-all" checked> Todos os ativos</label>
+        <label class="check"><input type="checkbox" id="only-local"> Usar só o que já foi baixado</label>
+        <span class="spacer"></span>
+        <button class="primary" id="run-collect">Coletar notas</button>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="progress-bar"><span id="progress-fill"></span></div>
+        <p id="progress-text"></p>
+      </div>
+
+      <table class="ledger" id="collect-table">
+        <thead>
+          <tr>
+            <th class="col-check"></th>
+            <th>Condomínio</th>
+            <th>CNPJ</th>
+            <th>Certificado</th>
+            <th class="num">Notas</th>
+            <th class="num">Valor</th>
+            <th class="num">INSS retido</th>
+            <th class="num">CSLL/PCC</th>
+            <th>Situação</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="result" id="result" hidden>
+        <p id="result-text"></p>
+        <button class="primary" id="open-result">Abrir planilha</button>
+        <button id="show-result">Mostrar na pasta</button>
+      </div>
+
+      <details class="log" id="log-box" hidden>
+        <summary>Detalhes da coleta</summary>
+        <ol id="log"></ol>
+      </details>
+    </section>
+
+    <!-- Condomínios -->
+    <section class="view" id="view-condominios" hidden>
+      <header class="page-head">
+        <h1>Condomínios</h1>
+        <button id="sync-condominiums">Atualizar a partir dos certificados</button>
+      </header>
+      <p class="hint">Cada certificado novo da pasta de certificados vira um condomínio. Desmarque
+        "Ativo" para deixar um condomínio fora da coleta.</p>
+      <table class="ledger" id="condominium-table">
+        <thead>
+          <tr>
+            <th>Ativo</th>
+            <th>Condomínio</th>
+            <th>CNPJ</th>
+            <th>Certificado</th>
+            <th>Observações</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Certificados -->
+    <section class="view" id="view-certificados" hidden>
+      <header class="page-head">
+        <h1>Certificados</h1>
+        <button class="primary" id="add-certificate">Adicionar certificado</button>
+      </header>
+      <p class="hint">A senha de cada certificado fica no cofre do sistema (Gerenciador de
+        Credenciais do Windows), nunca em arquivo.</p>
+      <table class="ledger" id="certificate-table">
+        <thead>
+          <tr>
+            <th>Arquivo</th>
+            <th>Titular</th>
+            <th>CNPJ</th>
+            <th>Validade</th>
+            <th>Situação</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Planilhas -->
+    <section class="view" id="view-planilhas" hidden>
+      <header class="page-head"><h1>Planilhas geradas</h1></header>
+      <p class="hint">Cada coleta gera uma planilha com as notas, o resumo por condomínio e as
+        propostas de lançamento nos controles de PIS, INSS e ISSQN.</p>
+      <table class="ledger" id="output-table">
+        <thead><tr><th>Arquivo</th><th>Gerada em</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <dialog id="password-dialog">
+    <form method="dialog" id="password-form">
+      <h2>Senha do certificado</h2>
+      <p id="password-file" class="hint"></p>
+      <label for="password-input">Senha</label>
+      <input type="password" id="password-input" autocomplete="off" required>
+      <p class="error" id="password-error" hidden></p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate>Cancelar</button>
+        <button class="primary" value="ok" id="password-ok">Salvar senha</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

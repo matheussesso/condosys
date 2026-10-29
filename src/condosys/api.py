@@ -199,7 +199,12 @@ def create_app(settings: Settings, token: str) -> FastAPI:
 
     @app.get("/api/health", dependencies=auth)
     def health() -> dict[str, str]:
-        return {"version": __version__, "base_dir": str(settings.base_dir)}
+        return {
+            "version": __version__,
+            "base_dir": str(settings.base_dir),
+            "certs_dir": str(settings.certs_dir),
+            "output_dir": str(settings.output_dir),
+        }
 
     @app.get("/api/certificates", dependencies=auth)
     def get_certificates() -> list[CertificateOut]:
@@ -375,6 +380,11 @@ def _free_port(host: str) -> int:
         return port
 
 
+def _exit_on_stdin_eof() -> None:
+    sys.stdin.read()
+    os._exit(0)
+
+
 def run_server(settings: Settings, port: int) -> None:
     """Runs the API until the process is stopped (the desktop app kills it on exit)."""
     if settings.api_host not in {"127.0.0.1", "localhost", "::1"}:
@@ -383,6 +393,9 @@ def run_server(settings: Settings, port: int) -> None:
     if port == 0:
         port = _free_port(settings.api_host)
     app = create_app(settings, token)
+    if os.environ.get("CONDOSYS_EXIT_ON_STDIN_EOF") == "1":
+        # Started by the desktop app: exit when it goes away, even if it crashed.
+        threading.Thread(target=_exit_on_stdin_eof, daemon=True).start()
     print(json.dumps({"event": "ready", "port": port}), flush=True)
     if "CONDOSYS_API_TOKEN" not in os.environ:
         print(f"token desta sessão: {token}", file=sys.stderr, flush=True)

@@ -1,0 +1,15 @@
+{
+  "name": "condosys-desktop",
+  "productName": "condosys",
+  "version": "0.1.0",
+  "description": "Interface do condosys: notas tomadas, controles e retenções dos condomínios.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "screenshot": "electron . --screenshot"
+  },
+  "devDependencies": {
+    "electron": "44.7.1"
+  }
+}
