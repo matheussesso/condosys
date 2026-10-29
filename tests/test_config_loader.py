@@ -10,10 +10,10 @@ from condosys.config_loader import (
     create_example_workbook,
     find_condominium,
     load_condominiums,
+    save_condominiums,
 )
-from condosys.models import AccessMode
 
-HEADER = ["ativo", "nome", "cnpj", "modo_acesso", "certificado", "observacoes"]
+HEADER = ["ativo", "nome", "cnpj", "certificado", "observacoes"]
 
 
 def write_sheet(path: Path, rows: list[list[object]], header: list[str] = HEADER) -> Path:
@@ -31,7 +31,7 @@ def write_sheet(path: Path, rows: list[list[object]], header: list[str] = HEADER
 def certs_dir(tmp_path: Path) -> Path:
     directory = tmp_path / "certs"
     directory.mkdir()
-    for name in ("the-sun.pfx", "i9-brasil.pfx", "sema.pfx"):
+    for name in ("the-sun.pfx", "led.pfx", "a.pfx", "b.pfx"):
         (directory / name).write_bytes(b"")
     return directory
 
@@ -43,38 +43,45 @@ def test_example_workbook_is_valid(tmp_path: Path, certs_dir: Path) -> None:
     the_sun = condominiums[0]
     assert the_sun.active
     assert the_sun.cnpj == "12166128000109"
-    assert the_sun.access_mode is AccessMode.DIRECT
+    assert the_sun.certificate == "the-sun.pfx"
     assert the_sun.row == 2
-    assert not condominiums[2].active
-    assert condominiums[2].access_mode is AccessMode.PROXY
+    assert not condominiums[1].active
 
 
 def test_accepts_accents_numbers_and_header_variants(tmp_path: Path, certs_dir: Path) -> None:
     path = write_sheet(
         tmp_path / "c.xlsx",
         [
-            ["Não", "Condomínio A", 7526557000100, "Procuração", "sema.pfx", None],
-            ["sim", "Condomínio B", "11.222.333/0001-81", "direto", "i9-brasil.pfx", 42],
+            ["Não", "Condomínio A", 7526557000100, "a.pfx", None],
+            ["sim", "Condomínio B", "11.222.333/0001-81", "b.pfx", 42],
         ],
-        header=["Ativo", "Nome", "CNPJ", "Modo Acesso", "Certificado", "Observações"],
+        header=["Ativo", "Nome", "CNPJ", "Certificado", "Observações"],
     )
     first, second = load_condominiums(path, certs_dir)
     assert not first.active
     assert first.cnpj == "07526557000100"
-    assert first.access_mode is AccessMode.PROXY
     assert second.active
-    assert second.access_mode is AccessMode.DIRECT
     assert second.notes == "42"
+
+
+def test_old_access_mode_column_is_ignored(tmp_path: Path, certs_dir: Path) -> None:
+    path = write_sheet(
+        tmp_path / "c.xlsx",
+        [["SIM", "The Sun", "12166128000109", "PROCURACAO", "the-sun.pfx", ""]],
+        header=["ativo", "nome", "cnpj", "modo_acesso", "certificado", "observacoes"],
+    )
+    (condominium,) = load_condominiums(path, certs_dir)
+    assert condominium.certificate == "the-sun.pfx"
 
 
 def test_reports_every_error_with_row_and_column(tmp_path: Path, certs_dir: Path) -> None:
     path = write_sheet(
         tmp_path / "c.xlsx",
         [
-            ["SIM", "OK", "12166128000109", "DIRETO", "the-sun.pfx", ""],
-            ["SIM", "CNPJ ruim", "12166128000100", "DIRETO", "the-sun.pfx", ""],
-            [None, None, None, None, None, None],  # blank rows are skipped
-            ["TALVEZ", "Modo ruim", "11222333000181", "OUTRO", "faltando.pfx", ""],
+            ["SIM", "OK", "12166128000109", "the-sun.pfx", ""],
+            ["SIM", "CNPJ ruim", "12166128000100", "a.pfx", ""],
+            [None, None, None, None, None],  # blank rows are skipped
+            ["TALVEZ", "Outro", "11222333000181", "faltando.pfx", ""],
         ],
     )
     with pytest.raises(ConfigError) as info:
@@ -82,7 +89,6 @@ def test_reports_every_error_with_row_and_column(tmp_path: Path, certs_dir: Path
     messages = [str(error) for error in info.value.errors]
     assert any(m.startswith("linha 3, coluna 'cnpj'") for m in messages)
     assert any(m.startswith("linha 5, coluna 'ativo'") for m in messages)
-    assert any(m.startswith("linha 5, coluna 'modo_acesso'") for m in messages)
     assert any("linha 5, coluna 'certificado'" in m and "faltando.pfx" in m for m in messages)
     assert not any("linha 2" in m for m in messages)
 
@@ -91,8 +97,8 @@ def test_duplicates(tmp_path: Path, certs_dir: Path) -> None:
     path = write_sheet(
         tmp_path / "c.xlsx",
         [
-            ["SIM", "The Sun", "12166128000109", "DIRETO", "the-sun.pfx", ""],
-            ["SIM", "THE SUN", "12166128000109", "DIRETO", "the-sun.pfx", ""],
+            ["SIM", "The Sun", "12166128000109", "the-sun.pfx", ""],
+            ["SIM", "THE SUN", "12166128000109", "the-sun.pfx", ""],
         ],
     )
     with pytest.raises(ConfigError) as info:
@@ -104,7 +110,7 @@ def test_duplicates(tmp_path: Path, certs_dir: Path) -> None:
 
 def test_missing_columns(tmp_path: Path) -> None:
     path = write_sheet(tmp_path / "c.xlsx", [], header=["nome", "cnpj"])
-    with pytest.raises(ConfigError, match="ativo, modo_acesso, certificado"):
+    with pytest.raises(ConfigError, match="ativo, certificado"):
         load_condominiums(path)
 
 
@@ -113,11 +119,18 @@ def test_missing_file(tmp_path: Path) -> None:
         load_condominiums(tmp_path / "nope.xlsx")
 
 
+def test_save_round_trip(tmp_path: Path, certs_dir: Path) -> None:
+    original = load_condominiums(create_example_workbook(tmp_path / "a.xlsx"), certs_dir)
+    saved = load_condominiums(save_condominiums(tmp_path / "b.xlsx", original), certs_dir)
+    assert [(c.name, c.cnpj, c.active, c.notes) for c in saved] == [
+        (c.name, c.cnpj, c.active, c.notes) for c in original
+    ]
+
+
 def test_find_condominium(tmp_path: Path, certs_dir: Path) -> None:
     condominiums = load_condominiums(create_example_workbook(tmp_path / "example.xlsx"), certs_dir)
     assert find_condominium(condominiums, "the sun").cnpj == "12166128000109"
     assert find_condominium(condominiums, "12.166.128/0001-09").name.startswith("THE SUN")
-    assert find_condominium(condominiums, "condomínio exemplo").access_mode is AccessMode.PROXY
     with pytest.raises(CondominiumNotFoundError, match="vários"):
         find_condominium(condominiums, "e")
     with pytest.raises(CondominiumNotFoundError, match="nenhum"):

@@ -12,8 +12,15 @@ from cryptography.hazmat.primitives import serialization
 
 from condosys.adn import decode_documents, fetch_dfe, same_cnpj_root
 from condosys.certificates import load_pfx
-from tests.conftest import PFX_PASSWORD, THE_SUN_CNPJ, make_ca, make_certificate, write_pfx
-from tests.test_browser import _pem_files, _server_certificate
+from tests.conftest import (
+    PFX_PASSWORD,
+    THE_SUN_CNPJ,
+    make_ca,
+    make_certificate,
+    pem_file,
+    server_certificate,
+    write_pfx,
+)
 
 XML = "<NFSe><infNFSe><tomador>12166128000109</tomador></infNFSe></NFSe>"
 
@@ -59,8 +66,8 @@ def adn_server(tmp_path: Path) -> Iterator[tuple[str, Path, Path]]:
     pfx = write_pfx(tmp_path / "c.pfx", key, cert, legacy=True)
     client_ca = tmp_path / "client-ca.pem"
     client_ca.write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
-    server_key, server_cert = _server_certificate()
-    server_pem = _pem_files(tmp_path, server_key, server_cert, "server")
+    server_key, server_cert = server_certificate()
+    server_pem = pem_file(tmp_path, server_key, server_cert, "server")
     server_ca = tmp_path / "server-ca.pem"
     server_ca.write_bytes(server_cert.public_bytes(serialization.Encoding.PEM))
 

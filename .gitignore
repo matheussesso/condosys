@@ -7,8 +7,9 @@ certs/*
 # Lista real de condomínios (dados de clientes). O exemplo é versionado.
 config/condominios.xlsx
 ~$*.xlsx
+.~lock.*#
 
-# Perfil do navegador do login assistido (cookies de sessão)
+# Perfil do navegador do antigo login assistido (pode conter cookies)
 browser-profile/
 
 # Saídas, dados baixados e depuração (contêm dados fiscais)
@@ -34,3 +35,8 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Interface (Electron)
+desktop/node_modules/
+desktop/dist/
+desktop/backend/

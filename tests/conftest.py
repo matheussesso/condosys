@@ -5,7 +5,7 @@ from pathlib import Path
 import keyring
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import (
     BestAvailableEncryption,
@@ -44,15 +44,6 @@ class MemoryKeyring(KeyringBackend):
             del self.store[(service, username)]
         except KeyError as exc:
             raise PasswordDeleteError(username) from exc
-
-
-@pytest.fixture(autouse=True)
-def automatic_login_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The assisted mode opens the real Chrome/Edge; tests opt in explicitly.
-    monkeypatch.setenv("CONDOSYS_LOGIN_MODE", "automatic")
-    # Tests drive local fake portals only.
-    monkeypatch.setenv("CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED", "true")
-    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -176,3 +167,37 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pat
 @pytest.fixture
 def settings(project_dir: Path) -> Settings:
     return get_settings()
+
+
+# --- local HTTPS servers ------------------------------------------------------------------
+
+
+def pem_file(tmp: Path, key: rsa.RSAPrivateKey, cert: x509.Certificate, name: str) -> Path:
+    path = tmp / f"{name}.pem"
+    path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        + cert.public_bytes(serialization.Encoding.PEM)
+    )
+    return path
+
+
+def server_certificate() -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = dt.datetime.now(dt.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=2))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    return key, cert

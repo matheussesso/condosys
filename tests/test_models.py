@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from condosys.documents import format_cnpj, is_valid_cnpj, normalize_cnpj, validate_cnpj
 from condosys.exporters.excel import build_output_path
-from condosys.models import AccessMode, Competence, Condominium, Invoice, parse_money
+from condosys.models import Competence, Condominium, Invoice, parse_money
 
 
 class TestCnpj:
@@ -92,7 +92,6 @@ class TestCondominium:
             "active": True,
             "name": "  THE SUN  ",
             "cnpj": "12.166.128/0001-09",
-            "access_mode": "DIRETO",
             "certificate": "the-sun.pfx",
         }
         data.update(overrides)
@@ -103,15 +102,10 @@ class TestCondominium:
         assert condominium.name == "THE SUN"
         assert condominium.cnpj == "12166128000109"
         assert condominium.cnpj_formatted == "12.166.128/0001-09"
-        assert condominium.access_mode is AccessMode.DIRECT
 
     def test_invalid_cnpj(self) -> None:
         with pytest.raises(ValidationError, match="CNPJ inválido"):
             Condominium.model_validate(self._data(cnpj="12166128000100"))
-
-    def test_invalid_access_mode(self) -> None:
-        with pytest.raises(ValidationError):
-            Condominium.model_validate(self._data(access_mode="OUTRO"))
 
     def test_certificate_must_exist_when_context_given(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="não encontrado"):

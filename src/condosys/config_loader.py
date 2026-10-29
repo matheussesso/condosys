@@ -12,7 +12,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from pydantic import ValidationError
 
 from condosys.documents import normalize_cnpj
-from condosys.models import AccessMode, Condominium
+from condosys.models import Condominium
 
 SHEET_NAME = "condominios"
 
@@ -21,11 +21,12 @@ COLUMNS: dict[str, str] = {
     "ativo": "active",
     "nome": "name",
     "cnpj": "cnpj",
-    "modo_acesso": "access_mode",
     "certificado": "certificate",
     "observacoes": "notes",
 }
-REQUIRED_COLUMNS = ("ativo", "nome", "cnpj", "modo_acesso", "certificado")
+REQUIRED_COLUMNS = ("ativo", "nome", "cnpj", "certificado")
+# Old spreadsheets may still have "modo_acesso": every condominium now uses its own
+# certificate (ADR-011), so the column is ignored.
 _FIELD_TO_COLUMN = {field: column for column, field in COLUMNS.items()}
 
 _YES = {"SIM", "S", "TRUE", "1", "X"}
@@ -77,13 +78,6 @@ def _parse_active(value: Any) -> bool | Any:
     if text in _NO:
         return False
     return value  # let Pydantic report it
-
-
-def _parse_access_mode(value: Any) -> Any:
-    if isinstance(value, str):
-        text = _plain(value)
-        return "PROCURACAO" if text.startswith("PROCURA") else text
-    return value
 
 
 def _cell_value(field: str, value: Any) -> Any:
@@ -153,7 +147,6 @@ def load_condominiums(config_file: Path, certs_dir: Path | None = None) -> list[
             for column, index in positions.items()
         }
         raw["active"] = _parse_active(raw["active"])
-        raw["access_mode"] = _parse_access_mode(raw["access_mode"])
         raw["row"] = row_number
         try:
             condominiums.append(Condominium.model_validate(raw, context={"certs_dir": certs_dir}))
@@ -170,9 +163,7 @@ def _row_errors(row_number: int, exc: ValidationError) -> Iterable[RowError]:
     for error in exc.errors():
         field = str(error["loc"][0]) if error["loc"] else None
         message = error["msg"].removeprefix("Value error, ")
-        if field == "access_mode":
-            message = f"use {AccessMode.DIRECT.value} ou {AccessMode.PROXY.value}"
-        elif field == "active":
+        if field == "active":
             message = "use SIM ou NÃO"
         yield RowError(row_number, _FIELD_TO_COLUMN.get(field or "", field), message)
 
@@ -232,43 +223,51 @@ def find_condominium(condominiums: Sequence[Condominium], query: str) -> Condomi
     raise CondominiumNotFoundError(query, partial)
 
 
-EXAMPLE_ROWS: list[tuple[str, str, str, str, str, str]] = [
-    ("SIM", "THE SUN FULL CONDOMINIUM RESORT", "12166128000109", "DIRETO", "the-sun.pfx", ""),
-    (
-        "SIM",
-        "CONDOMINIO EXEMPLO (PROCURACAO)",
-        "11222333000181",
-        "PROCURACAO",
-        "i9-brasil.pfx",
-        "Exemplo: acesso pelo certificado da i9 Brasil",
-    ),
+EXAMPLE_ROWS: list[tuple[str, str, str, str, str]] = [
+    ("SIM", "THE SUN FULL CONDOMINIUM RESORT", "12166128000109", "the-sun.pfx", ""),
     (
         "NÃO",
         "LED (EXEMPLO)",
         "12ABC34501DE35",
-        "PROCURACAO",
-        "sema.pfx",
+        "led.pfx",
         "LED: ISSQN zerado, registrar mesmo assim",
     ),
 ]
 
+_HELP_LINES = (
+    ("coluna", "descrição"),
+    ("ativo", "SIM ou NÃO — condomínios com NÃO são ignorados na coleta"),
+    ("nome", 'nome do condomínio (usado nos comandos, ex.: condosys notas "the sun")'),
+    ("cnpj", "CNPJ do condomínio, com ou sem pontuação"),
+    ("certificado", "nome do arquivo .pfx do próprio condomínio, dentro da pasta certs/"),
+    ("observacoes", "texto livre"),
+)
 
-def create_example_workbook(path: Path) -> Path:
-    """Writes the example condominium spreadsheet, with dropdowns and an instructions sheet."""
+
+def write_workbook(path: Path, rows: Iterable[Sequence[Any]]) -> Path:
+    """Writes a condominium spreadsheet (header, dropdowns, instructions sheet).
+
+    Args:
+        path: Destination ``.xlsx``.
+        rows: Values in the order of :data:`COLUMNS`.
+
+    Returns:
+        The written file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
     sheet = workbook.active
     assert sheet is not None
     sheet.title = SHEET_NAME
     sheet.append(list(COLUMNS))
-    for row in EXAMPLE_ROWS:
+    for row in rows:
         sheet.append(list(row))
 
     header_fill = PatternFill("solid", fgColor="1F4E78")
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = header_fill
-    for column, width in zip("ABCDEF", (8, 40, 20, 15, 22, 50), strict=True):
+    for column, width in zip("ABCDE", (8, 45, 20, 40, 50), strict=True):
         sheet.column_dimensions[column].width = width
     sheet.freeze_panes = "A2"
     # CNPJ as text so Excel keeps leading zeros.
@@ -277,27 +276,32 @@ def create_example_workbook(path: Path) -> Path:
             cell.number_format = "@"
 
     active_validation = DataValidation(type="list", formula1='"SIM,NÃO"', allow_blank=False)
-    mode_validation = DataValidation(type="list", formula1='"DIRETO,PROCURACAO"')
     sheet.add_data_validation(active_validation)
-    sheet.add_data_validation(mode_validation)
     active_validation.add("A2:A1000")
-    mode_validation.add("D2:D1000")
 
     help_sheet = workbook.create_sheet("instrucoes")
     help_sheet.column_dimensions["A"].width = 18
     help_sheet.column_dimensions["B"].width = 90
-    for line in (
-        ("coluna", "descrição"),
-        ("ativo", "SIM ou NÃO — condomínios com NÃO são ignorados na coleta"),
-        ("nome", 'nome do condomínio (usado nos comandos, ex.: condosys login-test "the sun")'),
-        ("cnpj", "CNPJ do condomínio, com ou sem pontuação"),
-        ("modo_acesso", "DIRETO (certificado do próprio condomínio) ou PROCURACAO (i9/Sema)"),
-        ("certificado", "nome do arquivo .pfx dentro da pasta certs/"),
-        ("observacoes", "texto livre"),
-    ):
+    for line in _HELP_LINES:
         help_sheet.append(list(line))
     help_sheet["A1"].font = Font(bold=True)
     help_sheet["B1"].font = Font(bold=True)
 
     workbook.save(path)
     return path
+
+
+def create_example_workbook(path: Path) -> Path:
+    """Writes the example condominium spreadsheet."""
+    return write_workbook(path, EXAMPLE_ROWS)
+
+
+def save_condominiums(path: Path, condominiums: Iterable[Condominium]) -> Path:
+    """Writes the condominium list back to the spreadsheet (overwrites the file)."""
+    return write_workbook(
+        path,
+        (
+            ("SIM" if c.active else "NÃO", c.name, c.cnpj, c.certificate, c.notes)
+            for c in condominiums
+        ),
+    )

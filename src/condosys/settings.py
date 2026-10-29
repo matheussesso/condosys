@@ -3,13 +3,9 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-BrowserChannel = Literal["chromium", "chrome", "msedge"]
-LoginMode = Literal["assisted", "automatic"]
 
 
 class Settings(BaseSettings):
@@ -27,8 +23,6 @@ class Settings(BaseSettings):
 
     base_dir: Path = Field(default_factory=Path.cwd)
     certs_dir: Path = Path("certs")
-    # Profile of the browser opened for the assisted login (kept between runs).
-    browser_profile_dir: Path = Path("browser-profile")
     config_file: Path = Path("config/condominios.xlsx")
     output_dir: Path = Path("output")
     # Local data downloaded from official APIs (fiscal data, git-ignored).
@@ -38,53 +32,23 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    # "assisted": a person logs in on the regular Chrome/Edge (certificate installed in the
-    # system), then condosys takes over. "automatic": Playwright browser with the .pfx via
-    # client_certificates — blocked by the iHub Cloudflare check today (ADR-009).
-    login_mode: LoginMode = "assisted"
-    # The iHub answered "Acesso automatizado deve usar o webservice do sistema" (ADR-010):
-    # portal automation stays off unless the portal support authorizes it in writing.
-    issnet_automation_authorized: bool = False
-    # Assisted login: browser executable (empty = find Chrome/Edge by browser_channel),
-    # extra command line arguments and how long to wait for the person to log in.
-    assisted_browser_path: Path | None = None
-    assisted_browser_args: list[str] = []
-    assisted_login_timeout_ms: int = Field(default=300_000, ge=1_000)
-
-    headless: bool = False
-    # "chromium" uses the browser downloaded by `playwright install chromium`;
-    # "msedge"/"chrome" use the browser installed on the machine.
-    browser_channel: BrowserChannel = "chromium"
-    timeout_ms: int = Field(default=30_000, ge=1_000)
-    navigation_timeout_ms: int = Field(default=60_000, ge=1_000)
-    # Short pause between browser actions, to be gentle with the portal.
-    slow_mo_ms: int = Field(default=300, ge=0)
-    # Extra wait while a person solves the "Confirme que é humano" check in the iHub popup.
-    human_check_timeout_ms: int = Field(default=180_000, ge=1_000)
-    # Pause between two condominiums in batch runs.
-    between_condominiums_ms: int = Field(default=3_000, ge=0)
-
-    issnet_login_url: str = (
-        "https://iss.fazenda.df.gov.br/online/Login/Login.aspx?ReturnUrl=%2fonline"
-    )
-    # Origins that receive the client certificate (scheme://host[:port], no path). The
-    # ISSNet login delegates the certificate check to the iHub popup (docs/decisoes.md).
-    issnet_cert_origins: list[str] = ["https://api.ihub.com.br"]
     # National NFS-e data environment (ADN), contributor distribution API.
     adn_base_url: str = "https://adn.nfse.gov.br"
     # One request at a time, with a pause; the next run continues after max_batches.
     adn_pause_ms: int = Field(default=1_000, ge=0)
     adn_max_batches: int = Field(default=100, ge=1)
-    # Re-encode the .pfx in memory with modern algorithms before handing it to the browser
-    # (A1 certificates often use legacy RC2/3DES encryption that OpenSSL 3 rejects).
-    reencode_pfx: bool = True
+    # Pause between two condominiums in batch runs.
+    between_condominiums_ms: int = Field(default=1_000, ge=0)
+
+    # Local API used by the desktop app (Electron). Loopback only.
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8765, ge=0, le=65535)
 
     @model_validator(mode="after")
     def _resolve_paths(self) -> "Settings":
         self.base_dir = self.base_dir.expanduser().resolve()
         for name in (
             "certs_dir",
-            "browser_profile_dir",
             "config_file",
             "output_dir",
             "data_dir",

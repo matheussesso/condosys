@@ -1,40 +1,19 @@
 """Command line interface (Typer)."""
 
-import contextlib
 import logging
-import re
 import shutil
-import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
 import typer
-from playwright.sync_api import BrowserContext
-from playwright.sync_api import Error as PlaywrightError
 from rich.console import Console
 from rich.table import Table
 
 from condosys import __version__
-from condosys.adn import (
-    AdnError,
-    AdnStore,
-    decode_documents,
-    fetch_dfe,
-    same_cnpj_root,
-    sync_documents,
-)
-from condosys.assisted_browser import AssistedLoginError
-from condosys.browser import BrowserSetupError
-from condosys.cert_store import CertStoreError, install_certificate
-from condosys.certificates import (
-    CertificateError,
-    LoadedCertificate,
-    list_certificate_files,
-    load_pfx,
-    read_certificate_info,
-)
+from condosys.adn import AdnError, decode_documents, fetch_dfe, same_cnpj_root
+from condosys.certificates import CertificateError, LoadedCertificate, load_pfx
 from condosys.config_loader import (
     CondominiumNotFoundError,
     ConfigError,
@@ -42,31 +21,30 @@ from condosys.config_loader import (
     find_condominium,
     load_condominiums,
 )
-from condosys.credentials import CredentialStoreError, delete_password, get_password, save_password
+from condosys.credentials import CredentialStoreError, get_password
 from condosys.documents import format_cnpj
+from condosys.exporters.excel import build_output_path, export_results
 from condosys.logging_setup import setup_logging
-from condosys.models import AccessMode, CertificateInfo, Competence, Condominium
-from condosys.portals.issnet import selectors
-from condosys.portals.issnet.invoices_page import TakenInvoicesPage
-from condosys.portals.issnet.session import (
-    IssnetSession,
-    LoginError,
-    NavigationError,
-    issnet_session,
-    needs_taxpayer_selection,
+from condosys.models import CertificateInfo, Competence, Condominium, RunResult
+from condosys.services.certificates import (
+    EXPIRY_WARNING_DAYS,
+    CertificateServiceError,
+    add_certificate,
+    certificate_status,
+    forget_password,
+    list_certificates,
 )
-from condosys.recon import PageRecorder, new_recon_dir
-from condosys.services.adn_invoices import taken_invoices
+from condosys.services.collect import collect_all, collect_condominium
+from condosys.services.condominiums import active_condominiums, sync_from_certificates
 from condosys.settings import Settings, get_settings
 
 logger = logging.getLogger("condosys.cli")
 console = Console()
 
-EXPIRY_WARNING_DAYS = 30
 FALLBACK_ENV = "# Configurações do condosys (veja .env.example no repositório).\n"
 
 app = typer.Typer(
-    help="condosys — automação da rotina fiscal de condomínios (ISSNet DF).",
+    help="condosys — rotina fiscal de condomínios (notas tomadas via ADN, retenções).",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -112,6 +90,11 @@ def _expiry_style(days: int) -> str:
     return "green"
 
 
+def _brl(value: Decimal) -> str:
+    text = f"{value:,.2f}"
+    return text.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 def _print_certificate(info: CertificateInfo) -> None:
     days = info.days_to_expire()
     table = Table(show_header=False, box=None)
@@ -137,6 +120,22 @@ def _load_condominiums(settings: Settings, check_certs: bool = True) -> list[Con
         raise typer.Exit(1) from exc
 
 
+def resolve_condominium(settings: Settings, query: str) -> Condominium:
+    """Finds a condominium of the spreadsheet by name or CNPJ, exiting on failure."""
+    condominiums = _load_condominiums(settings)
+    try:
+        return find_condominium(condominiums, query)
+    except CondominiumNotFoundError as exc:
+        raise _fail(str(exc)) from exc
+
+
+def _parse_competence(text: str) -> Competence:
+    try:
+        return Competence.parse(text)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+
 # --- init --------------------------------------------------------------------------------
 
 
@@ -148,6 +147,7 @@ def init() -> None:
         settings.certs_dir,
         settings.config_file.parent,
         settings.output_dir,
+        settings.data_dir,
         settings.logs_dir,
         settings.debug_dir,
     ):
@@ -170,8 +170,8 @@ def init() -> None:
 
     if not settings.config_file.exists():
         console.print(
-            f"\n[bold]Próximo passo:[/] copie {example.name} para {settings.config_file.name} "
-            "e preencha os condomínios."
+            "\n[bold]Próximo passo:[/] cadastre as senhas dos certificados "
+            "(condosys cert add certs/<arquivo>.pfx) e rode condosys config sync."
         )
 
 
@@ -185,7 +185,7 @@ def cert_add(
     ],
     name: Annotated[
         str | None,
-        typer.Option("--name", "-n", help="Nome do arquivo dentro de certs/ (ex.: the-sun.pfx)."),
+        typer.Option("--name", "-n", help="Nome do arquivo dentro de certs/ (ex.: madison.pfx)."),
     ] = None,
     overwrite: Annotated[
         bool, typer.Option("--overwrite", help="Substitui um arquivo de mesmo nome em certs/.")
@@ -195,28 +195,11 @@ def cert_add(
     settings = get_settings()
     password = typer.prompt("Senha do certificado", hide_input=True)
     try:
-        info = read_certificate_info(pfx_file, password)
-    except CertificateError as exc:
+        info = add_certificate(settings, pfx_file, password, name=name, overwrite=overwrite)
+    except (CertificateServiceError, CredentialStoreError) as exc:
         raise _fail(str(exc)) from exc
-
-    target_name = name or pfx_file.name
-    if not target_name.lower().endswith((".pfx", ".p12")):
-        target_name += ".pfx"
-    target = settings.certs_dir / target_name
-    settings.certs_dir.mkdir(parents=True, exist_ok=True)
-    if pfx_file.resolve() != target.resolve():
-        if target.exists() and not overwrite:
-            raise _fail(f"{target} já existe. Use --overwrite ou --name.")
-        shutil.copy2(pfx_file, target)
-        console.print(f"Arquivo copiado para {target}")
-
-    try:
-        save_password(target.name, password)
-    except CredentialStoreError as exc:
-        raise _fail(str(exc)) from exc
-
     console.print("[green]Certificado válido. Senha salva no cofre do sistema.[/]")
-    _print_certificate(info.model_copy(update={"file_name": target.name}))
+    _print_certificate(info)
     if info.is_expired():
         console.print("[bold red]Atenção: certificado vencido.[/]")
 
@@ -225,71 +208,41 @@ def cert_add(
 def cert_list() -> None:
     """Lista os certificados em certs/ com titular, CNPJ e validade."""
     settings = get_settings()
-    files = list_certificate_files(settings.certs_dir)
-    if not files:
+    try:
+        statuses = list_certificates(settings)
+    except CredentialStoreError as exc:
+        raise _fail(str(exc)) from exc
+    if not statuses:
         console.print(f"Nenhum certificado em {settings.certs_dir}.")
         return
-
     table = Table(title=f"Certificados em {settings.certs_dir}")
     for column in ("Arquivo", "Titular", "CNPJ", "Validade", "Dias p/ vencer", "Senha"):
         table.add_column(column)
-    for path in files:
-        try:
-            password = get_password(path.name)
-        except CredentialStoreError as exc:
-            raise _fail(str(exc)) from exc
-        if password is None:
-            table.add_row(path.name, "-", "-", "-", "-", "[yellow]não cadastrada[/]")
-            continue
-        try:
-            info = read_certificate_info(path, password)
-        except CertificateError as exc:
-            table.add_row(path.name, f"[red]{exc}[/]", "-", "-", "-", "[red]inválida?[/]")
-            continue
-        days = info.days_to_expire()
-        table.add_row(
-            path.name,
-            info.holder_name,
-            format_cnpj(info.cnpj) if info.cnpj else "-",
-            f"{info.not_after:%d/%m/%Y}",
-            f"[{_expiry_style(days)}]{days}[/]",
-            "[green]ok[/]",
-        )
+    for status in statuses:
+        if status.error:
+            table.add_row(status.file_name, f"[red]{status.error}[/]", "-", "-", "-", "[red]?[/]")
+        elif status.info is None:
+            table.add_row(status.file_name, "-", "-", "-", "-", "[yellow]não cadastrada[/]")
+        else:
+            days = status.info.days_to_expire()
+            table.add_row(
+                status.file_name,
+                status.info.holder_name,
+                format_cnpj(status.info.cnpj) if status.info.cnpj else "-",
+                f"{status.info.not_after:%d/%m/%Y}",
+                f"[{_expiry_style(days)}]{days}[/]",
+                "[green]ok[/]",
+            )
     console.print(table)
-
-
-@cert_app.command("install")
-def cert_install(
-    name: Annotated[str, typer.Argument(help="Nome do arquivo em certs/ (ex.: sema.pfx).")],
-) -> None:
-    """Instala o certificado no Chrome/Edge deste usuário (para o login assistido)."""
-    settings = get_settings()
-    path = settings.certs_dir / name
-    if not path.is_file():
-        raise _fail(f"{path} não existe. Cadastre antes com: condosys cert add <arquivo>")
-    try:
-        password = get_password(name)
-    except CredentialStoreError as exc:
-        raise _fail(str(exc)) from exc
-    if password is None:
-        raise _fail(f"senha de {name} não cadastrada. Rode: condosys cert add certs/{name}")
-    try:
-        info = read_certificate_info(path, password)
-        where = install_certificate(path, password)
-    except (CertificateError, CertStoreError) as exc:
-        raise _fail(str(exc)) from exc
-    console.print(f"[green]Certificado instalado:[/] {info.holder_name}")
-    console.print(f"Local: {where}")
-    console.print("Feche e abra o navegador para ele aparecer na lista de certificados.")
 
 
 @cert_app.command("remove")
 def cert_remove(
-    name: Annotated[str, typer.Argument(help="Nome do arquivo em certs/ (ex.: the-sun.pfx).")],
+    name: Annotated[str, typer.Argument(help="Nome do arquivo em certs/ (ex.: madison.pfx).")],
 ) -> None:
     """Remove a senha do certificado do cofre do sistema (o arquivo é mantido)."""
     try:
-        removed = delete_password(name)
+        removed = forget_password(name)
     except CredentialStoreError as exc:
         raise _fail(str(exc)) from exc
     if removed:
@@ -301,22 +254,47 @@ def cert_remove(
 # --- config ------------------------------------------------------------------------------
 
 
+@config_app.command("sync")
+def config_sync() -> None:
+    """Acrescenta à planilha os condomínios dos certificados de certs/ ainda não listados."""
+    settings = get_settings()
+    try:
+        summary = sync_from_certificates(settings)
+    except ConfigError as exc:
+        raise _fail(f"planilha inválida: {exc}") from exc
+    except CredentialStoreError as exc:
+        raise _fail(str(exc)) from exc
+    for added in summary.added:
+        state = "ativo" if added.active else "[yellow]inativo (verificar)[/]"
+        console.print(
+            f"[green]+[/] {added.name} ({added.cnpj_formatted}) — {added.certificate} — {state}"
+        )
+    for updated in summary.updated:
+        console.print(f"[cyan]~[/] {updated.name}: certificado → {updated.certificate}")
+    for skipped in summary.skipped:
+        console.print(
+            f"[yellow]![/] {skipped}: senha não cadastrada ou sem CNPJ "
+            f"(condosys cert add certs/{skipped})"
+        )
+    if not (summary.added or summary.updated):
+        console.print("Nada a acrescentar.")
+    console.print(f"Planilha: {settings.config_file}")
+
+
 def _check_row(settings: Settings, condominium: Condominium, today: date) -> tuple[str, str]:
     """Returns (status markup, message) for one condominium."""
     try:
-        password = get_password(condominium.certificate)
+        status = certificate_status(settings, condominium.certificate)
     except CredentialStoreError as exc:
         return "[red]ERRO[/]", str(exc)
-    if password is None:
+    if status.error:
+        return "[red]ERRO[/]", status.error
+    if status.info is None:
         return (
             "[red]ERRO[/]",
             f"senha não cadastrada (condosys cert add certs/{condominium.certificate})",
         )
-    try:
-        info = read_certificate_info(settings.certs_dir / condominium.certificate, password)
-    except CertificateError as exc:
-        return "[red]ERRO[/]", str(exc)
-
+    info = status.info
     problems: list[str] = []
     warnings: list[str] = []
     days = info.days_to_expire(today)
@@ -324,18 +302,12 @@ def _check_row(settings: Settings, condominium: Condominium, today: date) -> tup
         problems.append(f"certificado vencido em {info.not_after:%d/%m/%Y}")
     elif days < EXPIRY_WARNING_DAYS:
         warnings.append(f"certificado vence em {days} dias")
-    if condominium.access_mode is AccessMode.DIRECT:
-        if info.cnpj is None:
-            warnings.append("CNPJ não encontrado no certificado")
-        elif info.cnpj != condominium.cnpj:
-            problems.append(
-                f"modo DIRETO, mas o certificado é de {format_cnpj(info.cnpj)} ({info.holder_name})"
-            )
-        details = info.holder_name
-    else:
-        details = f"procuração via {info.holder_name}"
+    if info.cnpj is None:
+        problems.append("certificado sem CNPJ (o ADN exige e-CNPJ)")
+    elif not same_cnpj_root(info.cnpj, condominium.cnpj):
+        problems.append(f"o certificado é de {format_cnpj(info.cnpj)} ({info.holder_name})")
 
-    message = "; ".join([*problems, *warnings, details])
+    message = "; ".join([*problems, *warnings, info.holder_name])
     if problems:
         return "[red]ERRO[/]", message
     if warnings:
@@ -345,13 +317,12 @@ def _check_row(settings: Settings, condominium: Condominium, today: date) -> tup
 
 @config_app.command("check")
 def config_check() -> None:
-    """Valida condominios.xlsx e cruza com os certificados."""
+    """Valida condominios.xlsx e cruza com os certificados (o CNPJ tem de bater)."""
     settings = get_settings()
     condominiums = _load_condominiums(settings)
     table = Table(title=f"{settings.config_file.name}: {len(condominiums)} condomínios")
-    for column in ("Linha", "Ativo", "Nome", "CNPJ", "Acesso", "Certificado", "Status", "Detalhe"):
+    for column in ("Linha", "Ativo", "Nome", "CNPJ", "Certificado", "Status", "Detalhe"):
         table.add_column(column)
-
     today = date.today()
     has_error = False
     for condominium in condominiums:
@@ -362,7 +333,6 @@ def config_check() -> None:
             "SIM" if condominium.active else "[dim]NÃO[/]",
             condominium.name,
             condominium.cnpj_formatted,
-            condominium.access_mode.value,
             condominium.certificate,
             status,
             message,
@@ -373,267 +343,116 @@ def config_check() -> None:
     console.print("[green]Configuração válida.[/]")
 
 
-def resolve_condominium(settings: Settings, query: str) -> Condominium:
-    """Finds a condominium of the spreadsheet by name or CNPJ, exiting on failure."""
-    condominiums = _load_condominiums(settings)
-    try:
-        return find_condominium(condominiums, query)
-    except CondominiumNotFoundError as exc:
-        raise _fail(str(exc)) from exc
+# --- notas / coletar ---------------------------------------------------------------------
 
 
-# --- login-test / recon ------------------------------------------------------------------
-
-
-def _file_slug(text: str) -> str:
-    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return re.sub(r"[^0-9A-Za-z]+", "-", plain).strip("-").lower()[:40] or "condominio"
-
-
-IHUB_BLOCK_NOTICE = (
-    "Automação do portal ISSNet desativada. Em 23/10/2026 o iHub (login do portal) "
-    'respondeu: "Acesso automatizado deve usar o webservice do sistema. Se o uso é '
-    'legítimo, informe ao suporte o código a seguir. Ref.: 568F9D19". O condosys não '
-    "contorna esse bloqueio (docs/decisoes.md, ADR-010). Caminhos: API do ADN para acesso "
-    "DIRETO (condosys adn-test) e contato com o suporte do ISSNet sobre o webservice. Só "
-    "use CONDOSYS_ISSNET_AUTOMATION_AUTHORIZED=true se o suporte autorizar por escrito."
-)
-
-
-def _ensure_portal_automation_allowed(settings: Settings) -> None:
-    if not settings.issnet_automation_authorized:
-        raise _fail(IHUB_BLOCK_NOTICE)
-
-
-def _describe(settings: Settings, condominium: Condominium) -> None:
-    console.print(
-        f"Condomínio: [bold]{condominium.name}[/] ({condominium.cnpj_formatted}) — "
-        f"acesso {condominium.access_mode.value} com certs/{condominium.certificate}"
-    )
-    if settings.login_mode != "assisted":
-        return
-    holder = condominium.certificate
-    try:
-        password = get_password(condominium.certificate)
-        if password is not None:
-            info = read_certificate_info(settings.certs_dir / condominium.certificate, password)
-            holder = f"{info.holder_name} ({format_cnpj(info.cnpj) if info.cnpj else '-'})"
-    except (CredentialStoreError, CertificateError):
-        pass
-    console.print(
-        "\n[bold]Login assistido[/] — na janela do navegador que vai abrir:\n"
-        "  1. clique em [bold]Logar com certificado digital[/];\n"
-        f"  2. escolha o certificado [bold]{holder}[/];\n"
-        "  3. se aparecer [bold]Confirme que é humano[/], marque a caixa.\n"
-        "Quando o portal abrir, o condosys assume sozinho. "
-        f"(Aguardando até {settings.assisted_login_timeout_ms // 1000} s.)\n"
-    )
-
-
-def _select_company(session: IssnetSession, condominium: Condominium, interactive: bool) -> None:
-    """Selects the condominium on the "Empresas" screen, falling back to a manual step."""
-    if not session.on_company_selection():
-        if needs_taxpayer_selection(condominium):
-            logger.warning("Procuração, mas o portal não abriu a tela Empresas.")
-        return
-    try:
-        session.select_company(condominium)
-        return
-    except NavigationError as exc:
-        if not interactive:
-            raise _fail(str(exc)) from exc
-        console.print(f"\n[bold yellow]Não consegui selecionar a empresa sozinho:[/] {exc}")
-    console.print(
-        f"[bold yellow]Passo manual:[/] na tela Empresas, filtre pelo CNPJ "
-        f"{condominium.cnpj_formatted} e clique no ✓ de {condominium.name}."
-    )
-    console.input("Depois de selecionar, pressione [bold]Enter[/] aqui... ")
-
-
-def _open_taken_invoices(settings: Settings, session: IssnetSession, interactive: bool) -> bool:
-    """Opens "Consulta de Notas Tomadas"; returns whether the screen is open."""
-    page = TakenInvoicesPage(session.page, settings.debug_dir)
-    try:
-        page.open()
-        return True
-    except NavigationError as exc:
-        console.print(f"\n[bold yellow]Não consegui abrir Consulta de Notas Tomadas:[/] {exc}")
-        if not interactive:
-            return False
-    console.print(
-        "[bold yellow]Passo manual:[/] abra Menu → Declaração de Serviços Contratados → "
-        "Consulta de Notas Tomadas."
-    )
-    console.input("Depois de abrir, pressione [bold]Enter[/] aqui... ")
-    text, _ = session.identity_text()  # text of every frame (the screen opens in an iframe)
-    return selectors.TAKEN_INVOICES_PAGE_TEXT in text
-
-
-@app.command("login-test")
-def login_test(
-    condominio: Annotated[str, typer.Argument(help="Nome (ou parte do nome) ou CNPJ.")],
-    headless: Annotated[
-        bool, typer.Option("--headless", help="Não mostra a janela do navegador.")
-    ] = False,
-) -> None:
-    """Faz login no ISSNet com o certificado do condomínio e confere o ambiente."""
-    settings = get_settings()
-    _ensure_portal_automation_allowed(settings)
-    condominium = resolve_condominium(settings, condominio)
-    _describe(settings, condominium)
-    stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
-    base_name = f"login-test_{_file_slug(condominium.name)}_{stamp}"
-
-    try:
-        with issnet_session(settings, condominium, headless=headless) as session:
-            try:
-                session.login()
-            except LoginError:
-                shot = session.screenshot(settings.debug_dir / f"{base_name}_erro.png")
-                console.print(f"Screenshot do erro: {shot}")
-                raise
-            _select_company(session, condominium, interactive=not headless)
-            check = session.check_identity(condominium)
-            invoices_open = _open_taken_invoices(settings, session, interactive=not headless)
-            shot = session.screenshot(settings.debug_dir / f"{base_name}.png")
-            title = session.page.title()
-            url = session.page.url
-    except (BrowserSetupError, AssistedLoginError, LoginError, CredentialStoreError) as exc:
-        raise _fail(str(exc)) from exc
-    except PlaywrightError as exc:
-        raise _fail(f"erro no navegador: {exc}") from exc
-
-    table = Table(show_header=False, box=None)
-    table.add_row("Página", title)
-    table.add_row("URL", url.split("?")[0])
-    table.add_row(
-        f"CNPJ na página ({check.source})",
-        "[green]sim[/]" if check.cnpj_found else "[red]não[/]",
-    )
-    if check.header_name:
-        match = "[green]confere[/]" if check.selected_company_match else "[yellow]?[/]"
-        table.add_row("Empresa no cabeçalho", f"{check.header_name} ({match})")
-    table.add_row("Nome na página", "[green]sim[/]" if check.name_found else "[yellow]não[/]")
-    table.add_row(
-        "Consulta de Notas Tomadas", "[green]aberta[/]" if invoices_open else "[red]não abriu[/]"
-    )
-    table.add_row("Screenshot", str(shot))
-    console.print(table)
-    if not check.confirmed:
-        console.print(
-            "[bold yellow]Login feito, mas o CNPJ do condomínio não apareceu na página.[/] "
-            "Confira o screenshot; rode o recon para mapear o cabeçalho."
+def _print_invoices(result: RunResult, competence: Competence) -> None:
+    table = Table(title=f"{result.condominium_name} — notas tomadas em {competence.label}")
+    money = ("Valor", "ISS retido", "INSS", "IRRF", "CSLL/PCC", "Líquido")
+    for column in ("Nº", "Emissão", "Prestador", "Serviço", *money):
+        table.add_column(column, justify="right" if column in money else "left")
+    for invoice in result.invoices:
+        table.add_row(
+            invoice.number,
+            f"{invoice.issue_date:%d/%m/%Y}",
+            f"{invoice.provider_name[:30]} ({format_cnpj(invoice.provider_document)})",
+            invoice.service_code or "-",
+            _brl(invoice.amount),
+            _brl(invoice.iss_withheld),
+            _brl(invoice.inss),
+            _brl(invoice.irrf),
+            _brl(invoice.social_contributions_withheld),
+            _brl(invoice.net_amount),
         )
-        raise typer.Exit(2)
-    if not invoices_open:
-        raise typer.Exit(3)
-    console.print(
-        "[bold green]Login confirmado no ambiente do condomínio e "
-        "Consulta de Notas Tomadas aberta.[/]"
-    )
-
-
-def _wait_until_closed(context: BrowserContext, recorder: PageRecorder) -> None:
-    """Keeps the recorder running until every tab is closed."""
-    while True:
-        pages = [page for page in context.pages if not page.is_closed()]
-        if not pages:
-            return
-        with contextlib.suppress(PlaywrightError):
-            pages[-1].wait_for_timeout(500)
-        recorder.flush()
+    console.print(table)
 
 
 @app.command()
-def recon(
+def notas(
     condominio: Annotated[str, typer.Argument(help="Nome (ou parte do nome) ou CNPJ.")],
-    trace: Annotated[
-        bool,
-        typer.Option(
-            "--trace",
-            help="Grava também um trace do Playwright (trace.zip). Contém cookies da sessão.",
-        ),
+    competencia: Annotated[
+        str, typer.Option("--competencia", "-c", help="MM/AAAA (ex.: 09/2026).")
+    ],
+    sem_sincronizar: Annotated[
+        bool, typer.Option("--sem-sincronizar", help="Usa só o que já foi baixado.")
     ] = False,
 ) -> None:
-    """Faz login e abre o Playwright Inspector, salvando HTML + screenshot de cada tela."""
+    """Lista as notas tomadas por um condomínio na competência (API do ADN)."""
     settings = get_settings()
-    _ensure_portal_automation_allowed(settings)
+    competence = _parse_competence(competencia)
     condominium = resolve_condominium(settings, condominio)
-    _describe(settings, condominium)
-    out_dir = new_recon_dir(settings.debug_dir)
-    recorder = PageRecorder(out_dir)
-    contexts: list[BrowserContext] = []
-
-    def on_context(context: BrowserContext) -> None:
-        contexts.append(context)
-        recorder.attach(context)
-        if trace:
-            context.tracing.start(screenshots=True, snapshots=True)
-
-    login_failed = False
-    try:
-        with issnet_session(
-            settings, condominium, headless=False, on_context=on_context
-        ) as session:
-            try:
-                session.login()
-            except LoginError as exc:
-                login_failed = True
-                console.print(f"[bold red]Login falhou:[/] {exc}")
-                console.print("O Inspector vai abrir mesmo assim para investigar a tela.")
-            if session.assisted:
-                # The pages before the takeover were not recorded; save the current one.
-                recorder.capture(session.page, "inicial")
-            if not login_failed:
-                # The automatic steps are recorded too (Empresas filter, menu, query screen).
-                _select_company(session, condominium, interactive=True)
-                _open_taken_invoices(settings, session, interactive=False)
-            console.print(
-                "\n[bold]Recon em andamento[/]\n"
-                f"  - Tudo é salvo em {out_dir}\n"
-                "  - Cada página carregada é capturada automaticamente.\n"
-                "  - Use o botão [bold]Capturar[/] (canto inferior direito) após filtros e\n"
-                "    atualizações parciais (ex.: depois de clicar em Localizar).\n"
-                "  - No Inspector, 'Pick locator' mostra o seletor de um elemento.\n"
-                "  - Clique em 'Resume' (▶) no Inspector para continuar navegando sem ele;\n"
-                "    feche todas as abas do navegador para terminar."
-            )
-            session.page.pause()
-            recorder.flush()
-            console.print("Inspector retomado. Feche as abas do navegador para terminar.")
-            _wait_until_closed(session.page.context, recorder)
-            if trace:
-                try:
-                    session.page.context.tracing.stop(path=out_dir / "trace.zip")
-                    console.print(
-                        f"Trace salvo: {out_dir / 'trace.zip'} "
-                        "(abra com: uv run playwright show-trace <arquivo>)"
-                    )
-                except PlaywrightError as exc:
-                    console.print(f"[yellow]Não foi possível salvar o trace:[/] {exc}")
-    except (BrowserSetupError, AssistedLoginError, CredentialStoreError) as exc:
-        raise _fail(str(exc)) from exc
-    except PlaywrightError as exc:
-        # Closing the browser window while paused ends the session abruptly.
-        logger.debug("Sessão do navegador encerrada: %s", exc)
-        recorder.flush()
-
-    console.print(f"\n[bold]{recorder.count} capturas[/] em {out_dir}")
-    console.print(
-        "Próximo passo: preencha docs/issnet-mapa.md e "
-        "src/condosys/portals/issnet/selectors.py a partir desse material."
+    result = collect_condominium(
+        settings,
+        condominium,
+        competence,
+        sync=not sem_sincronizar,
+        on_phase=lambda message: console.print(f"[dim]{message}[/]"),
     )
-    if login_failed:
+    if not result.success:
+        raise _fail(result.error or "falha na coleta")
+    _print_invoices(result, competence)
+    console.print(f"{len(result.invoices)} notas.")
+
+
+@app.command()
+def coletar(
+    competencia: Annotated[
+        str, typer.Option("--competencia", "-c", help="MM/AAAA (ex.: 09/2026).")
+    ],
+    condominio: Annotated[
+        list[str] | None,
+        typer.Option("--condominio", help="Só estes condomínios (pode repetir)."),
+    ] = None,
+    sem_sincronizar: Annotated[
+        bool, typer.Option("--sem-sincronizar", help="Usa só o que já foi baixado.")
+    ] = False,
+) -> None:
+    """Coleta as notas tomadas de todos os condomínios ativos e gera o Excel em output/."""
+    settings = get_settings()
+    competence = _parse_competence(competencia)
+    if condominio:
+        targets = [resolve_condominium(settings, query) for query in condominio]
+    else:
+        try:
+            targets = active_condominiums(settings)
+        except ConfigError as exc:
+            raise _fail(f"planilha inválida: {exc}") from exc
+    if not targets:
+        raise _fail("nenhum condomínio ativo na planilha.")
+
+    def progress(index: int, total: int, condominium: Condominium, message: str) -> None:
+        console.print(f"[dim][{index}/{total}] {condominium.name}: {message}[/]")
+
+    results = collect_all(
+        settings, targets, competence, sync=not sem_sincronizar, progress=progress
+    )
+    output = export_results(
+        results, competence, build_output_path(settings.output_dir, competence, datetime.now())
+    )
+
+    table = Table(title=f"Coleta {competence.label}")
+    for column in ("Condomínio", "Situação", "Notas", "Valor total"):
+        table.add_column(column)
+    for result in results:
+        table.add_row(
+            result.condominium_name,
+            "[green]OK[/]" if result.success else f"[red]ERRO[/] {result.error}",
+            str(len(result.invoices)),
+            _brl(sum((i.amount for i in result.invoices), Decimal("0"))),
+        )
+    console.print(table)
+    console.print(f"Planilha gerada: [bold]{output}[/]")
+    if any(not r.success for r in results):
         raise typer.Exit(1)
 
 
-# --- ADN (national NFS-e data environment) -------------------------------------------------
+# --- ADN diagnostics --------------------------------------------------------------------------
 
 
 def _adn_target(
     settings: Settings, condominio: str | None, cert: str | None
 ) -> tuple[LoadedCertificate, str, str | None]:
-    """Returns (certificate, CNPJ to query, cnpjConsulta) for the ADN commands."""
+    """Returns (certificate, CNPJ to query, cnpjConsulta) for the ADN diagnostics."""
     cnpj: str | None = None
     if condominio is not None:
         condominium = resolve_condominium(settings, condominio)
@@ -656,112 +475,17 @@ def _adn_target(
         raise _fail(f"{certificate_file} não tem CNPJ (o ADN exige e-CNPJ).")
     if cnpj is not None and not same_cnpj_root(cnpj, loaded.info.cnpj):
         raise _fail(
-            f"o ADN só aceita certificado com a mesma raiz de CNPJ do consultado. "
-            f"{certificate_file} é de {loaded.info.holder_name}; para condomínios por "
-            "procuração não há acesso automatizado liberado (ADR-010)."
+            f"o ADN só aceita certificado com a mesma raiz de CNPJ do consultado; "
+            f"{certificate_file} é de {loaded.info.holder_name}."
         )
     target = cnpj or loaded.info.cnpj
     return loaded, target, cnpj if cnpj != loaded.info.cnpj else None
 
 
-@app.command("adn-notas")
-def adn_notas(
-    competencia: Annotated[
-        str, typer.Option("--competencia", "-c", help="MM/AAAA (ex.: 09/2026).")
-    ],
-    condominio: Annotated[
-        str | None,
-        typer.Argument(help="Condomínio (acesso DIRETO). Omitido: use --cert."),
-    ] = None,
-    cert: Annotated[
-        str | None,
-        typer.Option("--cert", help="Certificado em certs/ (notas tomadas pelo próprio CNPJ)."),
-    ] = None,
-    sem_sincronizar: Annotated[
-        bool, typer.Option("--sem-sincronizar", help="Usa só o que já foi baixado.")
-    ] = False,
-) -> None:
-    """Lista as notas tomadas na competência, a partir da API oficial do ADN."""
-    settings = get_settings()
-    try:
-        competence = Competence.parse(competencia)
-    except ValueError as exc:
-        raise _fail(str(exc)) from exc
-    loaded, target, cnpj_query = _adn_target(settings, condominio, cert)
-    store = AdnStore(settings.data_dir / "adn" / target)
-
-    if not sem_sincronizar:
-        console.print(
-            f"ADN: sincronizando {format_cnpj(target)} a partir do NSU {store.last_nsu}..."
-        )
-        try:
-            result = sync_documents(
-                settings.adn_base_url,
-                loaded,
-                store,
-                cnpj=cnpj_query,
-                pause_s=settings.adn_pause_ms / 1000,
-                max_batches=settings.adn_max_batches,
-            )
-        except AdnError as exc:
-            raise _fail(str(exc)) from exc
-        console.print(
-            f"{result.new_documents} documentos novos em {result.batches} consultas; "
-            f"último NSU {result.last_nsu}."
-        )
-        if not result.finished:
-            console.print(
-                "[yellow]Ainda há documentos a baixar: rode de novo para continuar.[/] "
-                "(As notas listadas abaixo podem estar incompletas.)"
-            )
-
-    invoices = taken_invoices(store.documents(), target, competence)
-    table = Table(title=f"Notas tomadas por {format_cnpj(target)} — {competence.label}")
-    for column in (
-        "Nº",
-        "Emissão",
-        "Prestador",
-        "Serviço",
-        "Valor",
-        "ISS retido",
-        "INSS",
-        "IRRF",
-        "CSLL/PCC",
-        "Líquido",
-    ):
-        table.add_column(
-            column,
-            justify="right"
-            if column in {"Valor", "ISS retido", "INSS", "IRRF", "CSLL/PCC", "Líquido"}
-            else "left",
-        )
-    for invoice in invoices:
-        table.add_row(
-            invoice.number,
-            f"{invoice.issue_date:%d/%m/%Y}",
-            f"{invoice.provider_name[:30]} ({format_cnpj(invoice.provider_document)})",
-            invoice.service_code or "-",
-            _brl(invoice.amount),
-            _brl(invoice.iss_withheld),
-            _brl(invoice.inss),
-            _brl(invoice.irrf),
-            _brl(invoice.social_contributions_withheld),
-            _brl(invoice.net_amount),
-        )
-    console.print(table)
-    console.print(f"{len(invoices)} notas. Dados locais em {store.root}")
-
-
-def _brl(value: Decimal) -> str:
-    text = f"{value:,.2f}"
-    return text.replace(",", "_").replace(".", ",").replace("_", ".")
-
-
 @app.command("adn-test")
 def adn_test(
     condominio: Annotated[
-        str | None,
-        typer.Argument(help="Condomínio (acesso DIRETO). Omitido: use --cert."),
+        str | None, typer.Argument(help="Condomínio. Omitido: use --cert.")
     ] = None,
     cert: Annotated[
         str | None,
@@ -800,3 +524,19 @@ def adn_test(
     if response.status_code >= 400:
         console.print(f"[yellow]Resposta do ADN:[/] {response.text[:500]}")
         raise typer.Exit(1)
+
+
+# --- local API for the desktop app --------------------------------------------------------
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int | None, typer.Option("--port", help="Porta (0 = escolher uma livre).")
+    ] = None,
+) -> None:
+    """Inicia a API local usada pela interface (Electron). Só aceita conexões locais."""
+    from condosys.api import run_server
+
+    settings = get_settings()
+    run_server(settings, port=settings.api_port if port is None else port)

@@ -114,16 +114,15 @@ def test_taken_invoices_filters_taker_competence_and_kind() -> None:
     assert found[0].issue_date == date(2026, 9, 15)
 
 
-def test_adn_notas_command_offline(settings: Settings, the_sun_pfx: Path) -> None:
+def test_notas_command_offline(settings: Settings, the_sun_pfx: Path) -> None:
     runner = CliRunner()
     runner.invoke(app, ["cert", "add", str(the_sun_pfx)], input=f"{PFX_PASSWORD}\n")
+    runner.invoke(app, ["config", "sync"])
     store = AdnStore(settings.data_dir / "adn" / THE_SUN_CNPJ)
     store.save(StoredDocument(1, "NFSE", "A", FIXTURE))
 
     result = runner.invoke(
-        app,
-        ["adn-notas", "--cert", "the-sun.pfx", "-c", "09/2026", "--sem-sincronizar"],
-        env={"COLUMNS": "220"},
+        app, ["notas", "the sun", "-c", "09/2026", "--sem-sincronizar"], env={"COLUMNS": "220"}
     )
     assert result.exit_code == 0, result.output
     assert "PRESTADOR FICTICIO" in result.output

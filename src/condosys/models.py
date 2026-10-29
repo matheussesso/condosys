@@ -61,13 +61,6 @@ Money = Annotated[Decimal, BeforeValidator(parse_money)]
 Document = Annotated[str, BeforeValidator(normalize_document)]
 
 
-class AccessMode(StrEnum):
-    """How the portal is accessed for a condominium."""
-
-    DIRECT = "DIRETO"
-    PROXY = "PROCURACAO"
-
-
 class Condominium(BaseModel):
     """A row of ``config/condominios.xlsx``.
 
@@ -79,7 +72,6 @@ class Condominium(BaseModel):
     active: bool
     name: str = Field(min_length=1)
     cnpj: str
-    access_mode: AccessMode
     certificate: str = Field(min_length=1)
     notes: str = ""
     row: int | None = None

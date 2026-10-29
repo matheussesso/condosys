@@ -154,6 +154,34 @@ Não forçar soluções frágeis. Registrar aqui o erro exato e seguir, nesta or
 - **Consequência:** a coleta não roda sem uma pessoa para o login de cada certificado; a
   Fase 4 deve agrupar condomínios por certificado.
 
+## ADR-011 — Reformulação: só APIs oficiais, um certificado por condomínio (29/10/2026)
+
+- **Contexto:** o escritório tem o certificado A1 de **todos** os condomínios. Com isso o
+  ADN (que exige a mesma raiz de CNPJ) cobre todos eles, e o portal ISSNet — bloqueado
+  para automação (ADR-010) — deixa de ser necessário.
+- **Decisão:**
+  1. **Fim do web scraping.** Removidos `portals/issnet`, `browser.py`,
+     `assisted_browser.py`, `recon.py`, `cert_store.py`, os comandos `login-test`,
+     `recon` e `cert install` e a dependência Playwright. O código fica no histórico do
+     git (até o commit `d8a2378`). `docs/issnet-mapa.md` fica como registro histórico.
+  2. **Notas tomadas = ADN**, com o certificado do próprio condomínio. A coluna
+     `modo_acesso` sai da planilha (planilhas antigas continuam abrindo: a coluna é
+     ignorada). `condosys config sync` monta a planilha a partir de `certs/`.
+  3. **Planilhas de controle:** Excel local sempre (abas Controle PIS/INSS/ISSQN no
+     arquivo da coleta) e, numa fase seguinte, Google Sheets (decisão do usuário: "os dois").
+  4. **Retenções federais pelo caminho oficial:** EFD-Reinf (R-2010 INSS retido, R-4020
+     PIS/COFINS/CSLL/IRRF, fechamento R-2099/R-4099) por webservice com o certificado do
+     condomínio; DCTFWeb (transmissão) e DARF pelo **Integra Contador do Serpro**
+     (decisão do usuário: contratar). Não existe API para "emitir no e-CAC" diretamente.
+  5. **Interface gráfica em Electron** (pedido do usuário, Windows): o Electron é só a
+     tela; a lógica continua em Python, exposta por uma API local (`condosys serve`,
+     FastAPI em 127.0.0.1 com token por sessão). Na distribuição, o Python vai empacotado
+     (PyInstaller) dentro do instalador do Electron.
+- **Segurança das etapas que transmitem:** Reinf, DCTFWeb e DARF têm efeito legal e
+  financeiro. Sempre em duas etapas: gerar → revisar na interface → confirmar
+  explicitamente → transmitir; desenvolvimento e testes primeiro no ambiente de
+  **produção restrita** da Reinf; nada é transmitido sem confirmação da pessoa.
+
 ## ADR-010 — iHub bloqueia acesso automatizado: automação do portal suspensa
 
 - **Contexto (23/10/2026, 00:56):** no login assistido (Chrome comum aberto pelo
